@@ -1,6 +1,6 @@
 # Fraimic E-Ink Canvas — Home Assistant integration
 > [!NOTE]
-> This integration is vibe code. Not made or maintained by Fraimic. Use at your own risk. Fraimic can change their API without notice.
+> This integration is vibe coded. Not made or maintained by Fraimic. Use at your own risk. Fraimic can change their API without notice.
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klaptafel&repository=ha-fraimic&category=integration)
 
