@@ -1,0 +1,11 @@
+# This file exists ONLY so Dependabot can scan and open PRs for our
+# Python dependencies -- Home Assistant itself does NOT read this file.
+# It has no effect on what gets installed; that's controlled entirely by
+# `custom_components/fraimic/manifest.json`'s "requirements" list.
+#
+# When Dependabot opens a PR bumping a version here, apply the SAME
+# version bump by hand to manifest.json -- that's the file that actually
+# matters. This file should always mirror manifest.json's requirements.
+Pillow>=9.1.0
+numpy>=1.24.0
+epaper-dithering>=5.0.0,<6
