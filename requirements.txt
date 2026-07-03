@@ -8,4 +8,4 @@
 # matters. This file should always mirror manifest.json's requirements.
 Pillow>=9.1.0
 numpy>=1.24.0
-epaper-dithering>=5.0.0,<6
+epaper-dithering>=5.0.7,<6
