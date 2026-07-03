@@ -205,7 +205,7 @@ def _atkinson_dither_indices(img: Image.Image) -> bytearray:
     it always runs in a background executor job, never on the event loop.
     """
     width, height = img.size
-    src = img.getdata()
+    src = img.get_flattened_data()  # getdata() is deprecated since Pillow 12.1
     r_buf = [float(p[0]) for p in src]
     g_buf = [float(p[1]) for p in src]
     b_buf = [float(p[2]) for p in src]
@@ -254,7 +254,7 @@ def _library_dither_indices(img: Image.Image, dither: str) -> bytearray:
 
     width, height = result.size
     indices = bytearray(width * height)
-    for i, px in enumerate(result.getdata()):
+    for i, px in enumerate(result.get_flattened_data()):  # getdata() is deprecated since Pillow 12.1
         idx = _RGB_TO_INDEX.get(px)
         if idx is None:
             # Shouldn't normally happen (dithered output should already be
