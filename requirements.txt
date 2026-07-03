@@ -7,5 +7,5 @@
 # version bump by hand to manifest.json -- that's the file that actually
 # matters. This file should always mirror manifest.json's requirements.
 Pillow>=9.1.0
-numpy>=1.24.0
+numpy>=2.5.0
 epaper-dithering>=5.0.7,<6
