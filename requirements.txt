@@ -6,6 +6,6 @@
 # When Dependabot opens a PR bumping a version here, apply the SAME
 # version bump by hand to manifest.json -- that's the file that actually
 # matters. This file should always mirror manifest.json's requirements.
-Pillow>=9.1.0
+Pillow>=12.3.0
 numpy>=2.5.0
 epaper-dithering>=5.0.7,<6
