@@ -29,7 +29,7 @@ send_image:
         whole image, pad with black -- CSS object-fit: contain) or fill
         (fill the frame, cropping overflow -- CSS object-fit: cover).
       required: false
-      default: fit
+      default: fill
       selector:
         select:
           options:
@@ -48,7 +48,7 @@ send_image:
         sierra_lite (fast, simple), jarvis_judice_ninke (smooth
         gradients, slowest).
       required: false
-      default: floyd_steinberg
+      default: atkinson
       selector:
         select:
           options:

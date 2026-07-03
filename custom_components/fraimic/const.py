@@ -31,8 +31,8 @@ ATTR_FIT = "fit"
 ATTR_DITHER = "dither"
 ATTR_DRY_RUN = "dry_run"
 
-DEFAULT_FIT = "fit"
-DEFAULT_DITHER = "floyd_steinberg"
+DEFAULT_FIT = "fill"
+DEFAULT_DITHER = "atkinson"
 DEFAULT_DRY_RUN = False
 
 # "none": nearest-color only, hard edges, banding on gradients.

@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Connect Fraimic E-Ink Canvas",
-        "description": "Enter your frame's address, e.g. http://fraimic.local or http://192.168.1.50. This is an unofficial, community-built integration, not affiliated with or supported by Fraimic.",
+        "description": "Use the frame's IP address, not the fraimic.local hostname -- recommended, since fraimic.local can point to the wrong frame if you ever have more than one on your network (see Fraimic's own guide, issue #1). Find the IP on the frame's local web interface or your router's DHCP client list.",
         "data": {
           "host": "Host"
         }
       },
       "reconfigure": {
         "title": "Change Fraimic address",
-        "description": "Update your frame's address, for example after an IP change.",
+        "description": "Update your frame's address. Use its IP address rather than fraimic.local -- see the note on the initial setup step for why.",
         "data": {
           "host": "Host"
         }
