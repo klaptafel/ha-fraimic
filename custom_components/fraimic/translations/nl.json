@@ -75,7 +75,7 @@
       "message": "Bestand niet gevonden: {path}"
     },
     "path_not_allowed": {
-      "message": "Pad '{path}' staat niet in Home Assistant's allowlist_external_dirs."
+      "message": "Pad {path} staat niet in Home Assistant's allowlist_external_dirs."
     },
     "unexpected_error": {
       "message": "Onverwachte fout: {error}"
