@@ -1,4 +1,5 @@
 # Fraimic E-Ink Canvas — Home Assistant integration
+
 > [!NOTE]
 > This integration is vibe coded. Not made or maintained by Fraimic. Use at your own risk. Fraimic can change their API without notice.
 
@@ -8,7 +9,6 @@ Based on:
 - Fraimic's REST API guide
 - [fraimic_bin_converter](https://github.com/Fraimic/fraimic_bin_converter) (Spectra 6 `.bin` format)
 - [epaper-dithering](https://github.com/OpenDisplay/epaper-dithering) (dithering)
-
 
 ## What you get
 
