@@ -2,15 +2,15 @@
   "config": {
     "step": {
       "user": {
-        "title": "Fraimic E-Ink Canvas verbinden",
-        "description": "Gebruik het IP-adres van het frame, niet de fraimic.local hostname -- aanbevolen, want fraimic.local kan naar het verkeerde frame wijzen zodra je er meer dan één op je netwerk hebt (zie Fraimic's eigen guide, issue #1). Vind het IP via de lokale webinterface van het frame of de DHCP-clientlijst van je router.",
+        "title": "Fraimic frame verbinden",
+        "description": "Gebruik het IP-adres van het frame, niet fraimic.local -- die hostname kan naar het verkeerde frame wijzen als je er meer dan één hebt. Vind het IP via de webinterface van het frame of de DHCP-lijst van je router.",
         "data": {
           "host": "Host"
         }
       },
       "reconfigure": {
         "title": "Fraimic adres wijzigen",
-        "description": "Werk het adres van je frame bij. Gebruik het IP-adres in plaats van fraimic.local -- zie de toelichting bij de eerste installatiestap voor de reden.",
+        "description": "Werk het adres van het frame bij. Gebruik het IP-adres, niet fraimic.local.",
         "data": {
           "host": "Host"
         }
@@ -22,7 +22,31 @@
     "abort": {
       "already_configured": "Dit frame is al toegevoegd.",
       "reconfigure_successful": "Adres bijgewerkt.",
-      "wrong_device": "Dit adres hoort bij een ander fysiek Fraimic frame dan degene die je aan het herconfigureren bent."
+      "wrong_device": "Dit is een ander fysiek frame dan degene die je aan het herconfigureren bent."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "percent": { "name": "Batterij" },
+      "voltage_mv": { "name": "Batterijspanning" },
+      "wifi_rssi": { "name": "WiFi-signaal" },
+      "wifi_ip": { "name": "IP-adres" },
+      "next_refresh": { "name": "Volgende geplande refresh" },
+      "last_seen": { "name": "Laatst gezien" }
+    },
+    "binary_sensor": {
+      "charging": { "name": "Opladen" },
+      "cable_connected": { "name": "Oplaadkabel aangesloten" },
+      "reachable": { "name": "Bereikbaar" },
+      "render_problem": { "name": "Weergaveprobleem" }
+    },
+    "button": {
+      "restart": { "name": "Herstarten" },
+      "sleep": { "name": "Slaapstand" },
+      "refresh": { "name": "Scherm verversen" }
+    },
+    "media_player": {
+      "display": { "name": "Scherm" }
     }
   },
   "exceptions": {
@@ -63,23 +87,23 @@
   "services": {
     "send_image": {
       "name": "Afbeelding versturen",
-      "description": "Converteert een lokaal beeldbestand naar het Spectra 6 .bin formaat en stuurt het naar het Fraimic frame. Handig vanuit automations/scripts.",
+      "description": "Stuurt een lokaal beeldbestand naar het frame, eerst geconverteerd naar het Spectra 6 formaat.",
       "fields": {
         "path": {
           "name": "Pad",
-          "description": "Volledig pad naar het beeldbestand (jpg/png/etc.), bijv. /config/www/fraimic/foto.jpg. Moet binnen een toegestane map staan (allowlist_external_dirs of /config/www)."
+          "description": "Pad naar het beeldbestand, bijv. /config/www/fraimic/foto.jpg. Moet in een toegestane map staan."
         },
         "fit": {
           "name": "Fit",
-          "description": "Hoe het beeld in het 1200x1600 frame past: fit (hele beeld zichtbaar, opgevuld met zwart -- CSS object-fit: contain) of fill (vult het frame, randen worden afgesneden -- CSS object-fit: cover)."
+          "description": "fit toont het hele beeld met zwarte randen; fill vult het frame en snijdt bij."
         },
         "dither": {
           "name": "Dithering",
-          "description": "Ditheralgoritme om het beeld naar 6 kleuren terug te brengen, via de epaper-dithering bibliotheek (valt terug op floyd_steinberg voor ordered/burkes/stucki/sierra/sierra_lite/jarvis_judice_ninke als die bibliotheek niet beschikbaar is): none (harde randen, banding), floyd_steinberg (meest gebruikt, goede standaard), atkinson (matcht de originele Fraimic conversietool), ordered (snel, zichtbaar patroon), burkes, stucki (brede foutverspreiding), sierra, sierra_lite (snel, eenvoudig), jarvis_judice_ninke (vloeiende verlopen, traagst)."
+          "description": "Ditheralgoritme voor de 6-kleuren conversie. atkinson matcht de originele Fraimic tool; floyd_steinberg is een snelle, veelgebruikte standaard. Gebruik dry run om een modus te bekijken voordat je het echt verstuurt."
         },
         "dry_run": {
           "name": "Testrun (dry run)",
-          "description": "Converteert de afbeelding en werkt de foto van de Display entity gewoon bij, maar slaat de daadwerkelijke upload naar het frame over. Handig om fit/dither/device_orientation resultaten te bekijken zonder telkens de 20-30 sec refresh-cyclus van het frame af te wachten."
+          "description": "Converteert en toont de afbeelding zonder deze naar het frame te uploaden."
         }
       }
     }
@@ -87,8 +111,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Fraimic weergave-standaarden",
-        "description": "Gebruikt bij het tikken op een afbeelding in de media browser, die geen extra parameters per tap kan meegeven. De fraimic.send_image service kan fit/dither altijd per aanroep overrulen (oriëntatie komt altijd hiervandaan, want dat is een fysiek gegeven over het frame, niet iets dat per foto verschilt).",
+        "title": "Weergave-standaarden",
+        "description": "Gebruikt bij het kiezen van afbeeldingen in de media browser. De send_image service kan fit/dither per aanroep overrulen; oriëntatie komt altijd hiervandaan.",
         "data": {
           "device_orientation": "Oriëntatie apparaat (fysieke montage)",
           "default_fit": "Standaard fit",

@@ -36,10 +36,9 @@ DEFAULT_DITHER = "atkinson"
 DEFAULT_DRY_RUN = False
 
 # "none": nearest-color only, hard edges, banding on gradients.
-# "floyd_steinberg": Pillow's built-in error-diffusion dither.
-# "atkinson": the algorithm fraimic_bin_converter itself uses -- Pillow
-# has no built-in Atkinson ditherer, so it's implemented by hand in
-# image_converter.py for closer parity with the original tool's output.
+# "floyd_steinberg": common error-diffusion dither, fast.
+# "atkinson": the algorithm fraimic_bin_converter itself uses -- closest
+# match to the original tool's output, and this integration's default.
 DITHER_MODES = (
     "none",
     "floyd_steinberg",

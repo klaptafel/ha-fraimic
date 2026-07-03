@@ -1,0 +1,15 @@
+{
+  "entity": {
+    "sensor": {
+      "wifi_ip": { "default": "mdi:ip-network" },
+      "voltage_mv": { "default": "mdi:current-dc" }
+    },
+    "button": {
+      "sleep": { "default": "mdi:sleep" },
+      "refresh": { "default": "mdi:monitor" }
+    },
+    "media_player": {
+      "display": { "default": "mdi:image-frame" }
+    }
+  }
+}

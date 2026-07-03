@@ -1,17 +1,17 @@
 """The Fraimic E-Ink Canvas integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.const import Platform
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import device_registry as dr
 
 from .const import CONF_HOST, DOMAIN
 from .coordinator import FraimicBatteryCoordinator, FraimicCoordinator
 from .image_store import FraimicImageStore
-from .runtime_data import FraimicRuntimeData, device_key
+from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, device_key
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,33 +28,24 @@ PLATFORMS: list[Platform] = [
 # deliberately left out of the model string below rather than guessed.
 DEVICE_MODEL = "E-Ink Canvas (Spectra 6)"
 
-# Entities retired during development (replaced or dropped as redundant).
-# Matched by unique_id *suffix* rather than a reconstructed exact
-# unique_id, so this reliably catches leftovers regardless of naming.
-_RETIRED_SUFFIXES: tuple[str, ...] = (
-    "_firmware_version",  # sensor: superseded by device_info.sw_version
-    "_firmware",  # update: removed entirely, no local install capability
-    "_now_showing",  # image: superseded by media_player entity_picture
-    "_last_boot",  # sensor: redundant with sensor.last_seen
-    "_last_refresh",  # sensor: redundant with sensor.last_seen
-    "_registered",  # binary_sensor: low-value, rarely changes
-)
 
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> bool:
     host = entry.data[CONF_HOST]
 
     coordinator = FraimicCoordinator(hass, host)
     battery_coordinator = FraimicBatteryCoordinator(hass, host)
-    await coordinator.async_config_entry_first_refresh()
-    await battery_coordinator.async_config_entry_first_refresh()
+    image_store = FraimicImageStore(hass, entry.entry_id)
+    await asyncio.gather(
+        coordinator.async_config_entry_first_refresh(),
+        battery_coordinator.async_config_entry_first_refresh(),
+        image_store.async_load(),
+    )
 
-    runtime_data = FraimicRuntimeData(
+    entry.runtime_data = FraimicRuntimeData(
         coordinator=coordinator,
         battery_coordinator=battery_coordinator,
-        image_store=FraimicImageStore(),
+        image_store=image_store,
     )
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime_data
 
     # Register the device explicitly (rather than relying on whichever
     # entity happens to be set up first) so model/firmware show up on the
@@ -78,20 +69,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(coordinator.async_add_listener(_sync_firmware_version))
 
-    # Clean up entities from retired platforms/fields so they don't linger
-    # as permanently "unavailable" and undeletable in the registry.
-    entity_reg = er.async_get(hass)
-    for reg_entry in list(er.async_entries_for_config_entry(entity_reg, entry.entry_id)):
-        if reg_entry.unique_id.endswith(_RETIRED_SUFFIXES):
-            entity_reg.async_remove(reg_entry.entity_id)
-            _LOGGER.debug("Removed retired Fraimic entity %s", reg_entry.entity_id)
-
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
-    return unload_ok
+async def async_unload_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> bool:
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> None:
+    """Delete the persisted last-sent-image preview when the entry itself
+    (not just a reload/unload) is removed, so nothing orphaned is left
+    behind in .storage."""
+    await FraimicImageStore(hass, entry.entry_id).async_remove()

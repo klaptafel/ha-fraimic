@@ -16,13 +16,15 @@ Output format (EL133UF1 / Spectra 6):
   (columns 600-1199). ALL left-half bytes for the whole image come first,
   then ALL right-half bytes. Total size is always exactly 960,000 bytes.
 
-Dithering prefers the optional `epaper-dithering` package (Rust core,
-https://github.com/OpenDisplay/epaper-dithering) when it's installed:
-faster and higher quality (OKLab color matching, serpentine scanning)
-than the hand-rolled fallback below. It's an optional dependency (compiled
-Rust extension -- not guaranteed to have a prebuilt wheel for every
-platform), so everything here degrades gracefully to the pure-Python
-implementation if it isn't available.
+Dithering is done by the required `epaper-dithering` package (Rust core,
+https://github.com/OpenDisplay/epaper-dithering): OKLab color matching,
+serpentine scanning, and all 9 error-diffusion algorithms. The frame's
+own conversion tool (fraimic_bin_converter) treats dithering quality as
+essential, not optional polish, so this doesn't carry a pure-Python
+fallback -- epaper-dithering ships wheels for every platform Home
+Assistant actually runs on (x86_64, aarch64/armv7l, and musllinux for
+HA OS's Alpine-based containers), so there's nothing realistic to
+degrade gracefully into.
 
 Always uses epaper_dithering's *theoretical* ColorScheme.BWGBRY palette
 (pure RGB primaries), not its "measured" SPECTRA_7_3_6COLOR* palettes --
@@ -36,19 +38,12 @@ from __future__ import annotations
 import io
 import logging
 
+import epaper_dithering as _epaper_dithering
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 from .const import PANEL_HEIGHT, PANEL_WIDTH
 
 _LOGGER = logging.getLogger(__name__)
-
-try:
-    import epaper_dithering as _epaper_dithering
-
-    _HAS_EPAPER_DITHERING = True
-except ImportError:
-    _epaper_dithering = None
-    _HAS_EPAPER_DITHERING = False
 
 # Palette order must match the code table below 1:1.
 _PALETTE_RGB = [
@@ -65,35 +60,6 @@ _RGB_TO_INDEX = {rgb: i for i, rgb in enumerate(_PALETTE_RGB)}
 _BRIGHTNESS = 1.1
 _CONTRAST = 1.2
 _SATURATION = 1.2
-
-# Atkinson error-diffusion offsets (dx, dy), each receiving 1/8 of the
-# quantization error -- only used by the pure-Python fallback:
-#        *  1  1
-#     1  1  1
-#        1
-_ATKINSON_OFFSETS = ((1, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (0, 2))
-
-# Algorithms the epaper_dithering library can handle for us -- all 9 it
-# supports. Our own hand-rolled fallback (used only if the library isn't
-# installed, e.g. no prebuilt wheel for an unusual platform) only covers
-# "none"/"floyd_steinberg" (via Pillow) and "atkinson" (hand-rolled below);
-# for the other 6, that fallback path degrades to floyd_steinberg with a
-# debug log rather than implementing 6 more error-diffusion algorithms by
-# hand for what should be a rare edge case.
-_LIBRARY_DITHER_MODES = frozenset(
-    {
-        "none",
-        "floyd_steinberg",
-        "atkinson",
-        "ordered",
-        "burkes",
-        "stucki",
-        "sierra",
-        "sierra_lite",
-        "jarvis_judice_ninke",
-    }
-)
-_FALLBACK_DITHER_MODES = frozenset({"none", "floyd_steinberg", "atkinson"})
 
 
 def _fit_image(img: Image.Image, fit: str, device_orientation: str) -> Image.Image:
@@ -182,68 +148,6 @@ def _nearest_palette_index(r: float, g: float, b: float) -> int:
     return best_idx
 
 
-def _pillow_quantize_indices(img: Image.Image, dither: str) -> bytearray:
-    """Fallback path: Pillow's built-in quantizer. Only supports "none"
-    and "floyd_steinberg" (no Atkinson without epaper_dithering or our
-    own hand-rolled version below)."""
-    pal_img = _build_palette_image()
-    dither_mode = Image.Dither.FLOYDSTEINBERG if dither == "floyd_steinberg" else Image.Dither.NONE
-    quantized = img.quantize(colors=len(_PALETTE_RGB), palette=pal_img, dither=dither_mode)
-    return bytearray(quantized.tobytes())
-
-
-def _atkinson_dither_indices(img: Image.Image) -> bytearray:
-    """Hand-rolled Atkinson error-diffusion fallback for when
-    epaper_dithering isn't installed. Pillow has no built-in Atkinson
-    ditherer (only Floyd-Steinberg via quantize()).
-
-    Deliberately plain Python floats/lists rather than numpy: this loop
-    is inherently sequential (each pixel's error depends on already-
-    processed neighbors, so it can't be vectorized away), and numpy's
-    per-element overhead is worse than plain floats for that access
-    pattern. Takes a few seconds on a full 1200x1600 image -- fine since
-    it always runs in a background executor job, never on the event loop.
-    """
-    width, height = img.size
-    src = img.get_flattened_data()  # getdata() is deprecated since Pillow 12.1
-    r_buf = [float(p[0]) for p in src]
-    g_buf = [float(p[1]) for p in src]
-    b_buf = [float(p[2]) for p in src]
-
-    indices = bytearray(width * height)
-    palette = _PALETTE_RGB
-
-    for y in range(height):
-        row = y * width
-        for x in range(width):
-            i = row + x
-            r, g, b = r_buf[i], g_buf[i], b_buf[i]
-
-            best_idx = 0
-            best_dist = None
-            for pi, (pr, pg, pb) in enumerate(palette):
-                dist = (pr - r) ** 2 + (pg - g) ** 2 + (pb - b) ** 2
-                if best_dist is None or dist < best_dist:
-                    best_dist = dist
-                    best_idx = pi
-            indices[i] = best_idx
-
-            pr, pg, pb = palette[best_idx]
-            er = (r - pr) / 8.0
-            eg = (g - pg) / 8.0
-            eb = (b - pb) / 8.0
-
-            for dx, dy in _ATKINSON_OFFSETS:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < width and 0 <= ny < height:
-                    j = ny * width + nx
-                    r_buf[j] += er
-                    g_buf[j] += eg
-                    b_buf[j] += eb
-
-    return indices
-
-
 def _library_dither_indices(img: Image.Image, dither: str) -> bytearray:
     """Preferred path: the epaper_dithering Rust extension."""
     lib_mode = getattr(_epaper_dithering.DitherMode, dither.upper())
@@ -254,7 +158,7 @@ def _library_dither_indices(img: Image.Image, dither: str) -> bytearray:
 
     width, height = result.size
     indices = bytearray(width * height)
-    for i, px in enumerate(result.get_flattened_data()):  # getdata() is deprecated since Pillow 12.1
+    for i, px in enumerate(result.getdata()):
         idx = _RGB_TO_INDEX.get(px)
         if idx is None:
             # Shouldn't normally happen (dithered output should already be
@@ -321,11 +225,7 @@ def convert_image(
     CONF_DEVICE_ORIENTATION in const.py for important caveats.
     `dither`: "none", "floyd_steinberg", "atkinson", "ordered", "burkes",
     "stucki", "sierra", "sierra_lite", or "jarvis_judice_ninke" -- all 9
-    algorithms epaper_dithering supports. Uses that library when
-    installed (faster, higher quality); otherwise falls back to Pillow's
-    built-in quantizer ("none", "floyd_steinberg") or a hand-rolled
-    implementation ("atkinson") -- the other 6 fall back to
-    floyd_steinberg if the library is unavailable.
+    algorithms epaper_dithering supports.
     Always uses the theoretical BWGBRY palette (see module docstring).
 
     Returns (bin_data, preview_png). preview_png is the quantized/dithered
@@ -361,37 +261,7 @@ def convert_image(
 
     img = _fit_image(img, fit, device_orientation)
 
-    if _HAS_EPAPER_DITHERING and dither in _LIBRARY_DITHER_MODES:
-        try:
-            indices = _library_dither_indices(img, dither)
-        except Exception:  # noqa: BLE001
-            _LOGGER.exception(
-                "epaper_dithering failed for dither='%s', falling back to "
-                "built-in dithering",
-                dither,
-            )
-            indices = None
-    else:
-        indices = None
-
-    if indices is None:
-        # Our own hand-rolled fallback only covers 3 of the 9 algorithms
-        # (see _FALLBACK_DITHER_MODES) -- this only gets hit at all if
-        # epaper_dithering is unavailable/failed, which should be rare
-        # since it's a manifest.json requirement. For the other 6, fall
-        # back to floyd_steinberg rather than silently producing a wrong
-        # or crashing result.
-        effective_dither = dither if dither in _FALLBACK_DITHER_MODES else "floyd_steinberg"
-        if effective_dither != dither:
-            _LOGGER.debug(
-                "No fallback implementation for dither='%s' without "
-                "epaper_dithering; using floyd_steinberg instead.",
-                dither,
-            )
-        if effective_dither == "atkinson":
-            indices = _atkinson_dither_indices(img)
-        else:
-            indices = _pillow_quantize_indices(img, effective_dither)
+    indices = _library_dither_indices(img, dither)
 
     bin_data = _pack_bin(indices)
     preview_png = _indices_to_preview_png(indices)

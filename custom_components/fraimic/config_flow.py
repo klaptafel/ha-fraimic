@@ -40,6 +40,16 @@ async def _validate_host(hass: HomeAssistant, host: str) -> dict[str, Any]:
     return await api.get_info(session, host)
 
 
+async def _try_validate(
+    hass: HomeAssistant, host: str
+) -> tuple[dict[str, Any] | None, dict[str, str]]:
+    """Validate `host`, returning (info, errors) -- info is None on failure."""
+    try:
+        return await _validate_host(hass, host), {}
+    except (ClientError, TimeoutError, HomeAssistantError):
+        return None, {"base": "cannot_connect"}
+
+
 def _device_key(info: dict[str, Any], fallback_host: str) -> str:
     """Prefer the frame's own hardware device_key as the unique id, so
     entity/device identity survives removing and re-adding the integration
@@ -60,11 +70,8 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             host = user_input[CONF_HOST].rstrip("/")
-            try:
-                info = await _validate_host(self.hass, host)
-            except (ClientError, TimeoutError, HomeAssistantError):
-                errors["base"] = "cannot_connect"
-            else:
+            info, errors = await _try_validate(self.hass, host)
+            if info is not None:
                 await self.async_set_unique_id(_device_key(info, host))
                 # If this exact frame is already configured (e.g. someone
                 # re-runs "Add integration" after its IP changed), update
@@ -82,11 +89,8 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             host = user_input[CONF_HOST].rstrip("/")
-            try:
-                info = await _validate_host(self.hass, host)
-            except (ClientError, TimeoutError, HomeAssistantError):
-                errors["base"] = "cannot_connect"
-            else:
+            info, errors = await _try_validate(self.hass, host)
+            if info is not None:
                 await self.async_set_unique_id(_device_key(info, host))
                 # Guard against accidentally pointing this entry at a
                 # different physical frame.

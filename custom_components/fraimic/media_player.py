@@ -34,7 +34,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.network import get_url
 
@@ -57,10 +56,20 @@ from .const import (
     FIT_MODES,
     SERVICE_SEND_IMAGE,
 )
+from .entity import FraimicEntity
 from .image_converter import convert_image
-from .runtime_data import FraimicRuntimeData, device_key
+from .runtime_data import FraimicConfigEntry, FraimicRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
+
+# Deliberately 0 (no HA-managed queueing): _busy_lock is what enforces
+# "one conversion+upload at a time", and it does so by *rejecting* a
+# second call immediately with a visible "already_busy" error, not by
+# making the caller wait. PARALLEL_UPDATES=1 would instead have HA queue
+# the second call behind a semaphore -- it would silently run for real
+# once the first finishes, exactly the silent-backlog behavior the
+# busy-lock check exists to prevent (see the comment in _convert_and_send).
+PARALLEL_UPDATES = 0
 
 SEND_IMAGE_SCHEMA = {
     vol.Required(ATTR_PATH): cv.string,
@@ -72,10 +81,16 @@ SEND_IMAGE_SCHEMA = {
 _MEDIA_SOURCE_PREFIX = "media-source://media_source/"
 
 
+def _display_name(source: str) -> str:
+    """Best-effort human-readable name for a path/URL/media-source id, for
+    the "sending..." notification -- doesn't need to be exact."""
+    return urllib.parse.unquote(source.rstrip("/").rsplit("/", 1)[-1]) or source
+
+
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant, entry: FraimicConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    runtime: FraimicRuntimeData = hass.data[DOMAIN][entry.entry_id]
+    runtime = entry.runtime_data
     async_add_entities([FraimicMediaPlayer(runtime, entry)])
 
     platform = entity_platform.async_get_current_platform()
@@ -84,36 +99,22 @@ async def async_setup_entry(
     )
 
 
-class FraimicMediaPlayer(MediaPlayerEntity):
+class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
     """Represents the frame as a media player you can push images to."""
 
     _attr_supported_features = (
         MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA
     )
     _attr_media_content_type = MediaType.IMAGE
-    _attr_icon = "mdi:image-frame"
-    _attr_has_entity_name = True
+    _attr_translation_key = "display"
 
     def __init__(self, runtime: FraimicRuntimeData, entry: ConfigEntry) -> None:
+        super().__init__(runtime.coordinator, entry, "display")
         self._runtime = runtime
         self._entry = entry
         self._busy_lock = asyncio.Lock()
-        self._attr_unique_id = f"{device_key(entry)}_display"
-        self._attr_name = "Display"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_key(entry))})
         self._attr_state = MediaPlayerState.IDLE
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        # Reflect "frame unreachable" (e.g. asleep) as unavailable, instead
-        # of only surfacing an error once someone taps play.
-        self.async_on_remove(
-            self._runtime.coordinator.async_add_listener(self.async_write_ha_state)
-        )
-
-    @property
-    def available(self) -> bool:
-        return self._runtime.coordinator.device_reachable
+        self._sending: str | None = None
 
     # -- "album art" for the last image sent, shown as entity_picture --
 
@@ -130,6 +131,14 @@ class FraimicMediaPlayer(MediaPlayerEntity):
 
     @property
     def media_title(self) -> str | None:
+        # While a conversion+upload is in progress, reflects that instead
+        # of the last-sent timestamp -- the only free (no extra
+        # subsystems, no dependency on the user having a notification
+        # panel open) confirmation that a tap actually landed, since a
+        # real toast isn't something a backend-only integration can
+        # trigger outside of service-call failures.
+        if self._sending is not None:
+            return f"Sending {self._sending}…"
         updated_at = self._runtime.image_store.updated_at
         if updated_at is None:
             return None
@@ -166,7 +175,7 @@ class FraimicMediaPlayer(MediaPlayerEntity):
 
         fit = self._entry.options.get(CONF_DEFAULT_FIT, DEFAULT_FIT)
         dither = self._entry.options.get(CONF_DEFAULT_DITHER, DEFAULT_DITHER)
-        await self._convert_and_send(raw_bytes, fit, dither)
+        await self._convert_and_send(raw_bytes, fit, dither, source=media_id)
 
     async def async_send_local_file(
         self,
@@ -189,10 +198,10 @@ class FraimicMediaPlayer(MediaPlayerEntity):
                 translation_placeholders={"path": path},
             )
         raw_bytes = await self.hass.async_add_executor_job(self._read_local_file, path)
-        await self._convert_and_send(raw_bytes, fit, dither, dry_run=dry_run)
+        await self._convert_and_send(raw_bytes, fit, dither, dry_run=dry_run, source=path)
 
     async def _convert_and_send(
-        self, raw_bytes: bytes, fit: str, dither: str, dry_run: bool = False
+        self, raw_bytes: bytes, fit: str, dither: str, dry_run: bool = False, source: str = ""
     ) -> None:
         # device_orientation isn't caller-supplied -- it's a fact about
         # how the frame is physically mounted, not something that varies
@@ -214,6 +223,7 @@ class FraimicMediaPlayer(MediaPlayerEntity):
             )
         async with self._busy_lock:
             self._attr_state = MediaPlayerState.BUFFERING
+            self._sending = _display_name(source)
             self.async_write_ha_state()
             try:
                 bin_data, preview_png = await self.hass.async_add_executor_job(
@@ -229,8 +239,9 @@ class FraimicMediaPlayer(MediaPlayerEntity):
                 else:
                     session = async_get_clientsession(self.hass)
                     await api.upload_image(session, self._runtime.base_url, bin_data)
-                self._runtime.image_store.set(preview_png)
+                await self._runtime.image_store.async_set(preview_png)
             finally:
+                self._sending = None
                 self._attr_state = MediaPlayerState.IDLE
                 self.async_write_ha_state()
 

@@ -1,0 +1,5 @@
+# Test-only dependencies. Not read by Home Assistant -- see requirements.txt
+# for the note on how that mirrors manifest.json instead.
+pytest-homeassistant-custom-component
+pytest-asyncio
+pytest-cov

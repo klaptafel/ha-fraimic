@@ -10,6 +10,12 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    ignore:
+      # Home Assistant core exact-pins its own Pillow version and refuses
+      # to install a different one for a custom integration -- bumping
+      # our floor above HA's current pin breaks setup entirely. Bump
+      # manually, only after verifying against a real HA install.
+      - dependency-name: "Pillow"
 
   # Keeps the GitHub Actions themselves (if any get added later, e.g. for
   # HACS validation) up to date.

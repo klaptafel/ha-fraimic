@@ -62,6 +62,22 @@ class _BaseFraimicCoordinator(DataUpdateCoordinator[dict]):
     def _mark_success(self) -> None:
         self._last_success = dt_util.utcnow()
 
+    async def _fetch(self, session) -> dict:
+        raise NotImplementedError
+
+    async def _async_update_data(self) -> dict:
+        session = async_get_clientsession(self.hass)
+        try:
+            data = await self._fetch(session)
+        except HomeAssistantError as err:
+            raise UpdateFailed(str(err)) from err
+        except (ClientError, TimeoutError) as err:
+            raise UpdateFailed(
+                f"Could not connect to Fraimic frame at {self.base_url}: {err}"
+            ) from err
+        self._mark_success()
+        return data
+
 
 class FraimicCoordinator(_BaseFraimicCoordinator):
     """Polls /api/info."""
@@ -69,18 +85,8 @@ class FraimicCoordinator(_BaseFraimicCoordinator):
     def __init__(self, hass: HomeAssistant, host: str) -> None:
         super().__init__(hass, host, f"{DOMAIN}_info", DEFAULT_SCAN_INTERVAL)
 
-    async def _async_update_data(self) -> dict:
-        session = async_get_clientsession(self.hass)
-        try:
-            data = await api.get_info(session, self.base_url)
-        except HomeAssistantError as err:
-            raise UpdateFailed(str(err)) from err
-        except (ClientError, TimeoutError) as err:
-            raise UpdateFailed(
-                f"Kan geen verbinding maken met Fraimic frame op {self.base_url}: {err}"
-            ) from err
-        self._mark_success()
-        return data
+    async def _fetch(self, session) -> dict:
+        return await api.get_info(session, self.base_url)
 
 
 class FraimicBatteryCoordinator(_BaseFraimicCoordinator):
@@ -89,15 +95,5 @@ class FraimicBatteryCoordinator(_BaseFraimicCoordinator):
     def __init__(self, hass: HomeAssistant, host: str) -> None:
         super().__init__(hass, host, f"{DOMAIN}_battery", DEFAULT_BATTERY_SCAN_INTERVAL)
 
-    async def _async_update_data(self) -> dict:
-        session = async_get_clientsession(self.hass)
-        try:
-            data = await api.get_battery(session, self.base_url)
-        except HomeAssistantError as err:
-            raise UpdateFailed(str(err)) from err
-        except (ClientError, TimeoutError) as err:
-            raise UpdateFailed(
-                f"Kan geen verbinding maken met Fraimic frame op {self.base_url}: {err}"
-            ) from err
-        self._mark_success()
-        return data
+    async def _fetch(self, session) -> dict:
+        return await api.get_battery(session, self.base_url)

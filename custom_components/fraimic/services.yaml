@@ -5,8 +5,8 @@
 send_image:
   name: Send image
   description: >-
-    Converts a local image file to the Spectra 6 .bin format and sends
-    it to the Fraimic frame. Handy from automations/scripts.
+    Sends a local image file to the frame, converting it to the
+    Spectra 6 format first.
   target:
     entity:
       domain: media_player
@@ -15,9 +15,8 @@ send_image:
     path:
       name: Path
       description: >-
-        Full path to the image file (jpg/png/etc.), e.g.
-        /config/www/fraimic/photo.jpg. Must be within an allowed
-        directory (allowlist_external_dirs or /config/www).
+        Path to the image file. Must be in an allowed directory
+        (allowlist_external_dirs or /config/www).
       required: true
       example: "/config/www/fraimic/vacation_photo.jpg"
       selector:
@@ -25,9 +24,8 @@ send_image:
     fit:
       name: Fit
       description: >-
-        How to fit the image into the 1200x1600 frame: fit (show the
-        whole image, pad with black -- CSS object-fit: contain) or fill
-        (fill the frame, cropping overflow -- CSS object-fit: cover).
+        fit shows the whole image with black padding; fill crops
+        to fill the frame.
       required: false
       default: fill
       selector:
@@ -38,15 +36,9 @@ send_image:
     dither:
       name: Dithering
       description: >-
-        Dithering algorithm for reducing the image to 6 colors, via the
-        epaper-dithering library (falls back to floyd_steinberg for
-        ordered/burkes/stucki/sierra/sierra_lite/jarvis_judice_ninke if
-        that library isn't available): none (hard edges, banding),
-        floyd_steinberg (most common, good default), atkinson (matches
-        the original Fraimic conversion tool), ordered (fast, visible
-        pattern), burkes, stucki (wide error distribution), sierra,
-        sierra_lite (fast, simple), jarvis_judice_ninke (smooth
-        gradients, slowest).
+        Dithering algorithm for the 6-color conversion. atkinson matches
+        the original Fraimic tool; floyd_steinberg is a fast, common
+        default. Use dry run to preview a mode first.
       required: false
       default: atkinson
       selector:
@@ -64,10 +56,7 @@ send_image:
     dry_run:
       name: Dry run
       description: >-
-        Converts the image and updates the Display entity's picture like
-        normal, but skips actually uploading it to the frame. Handy for
-        previewing fit/dither/device_orientation results without waiting
-        through the frame's 20-30s refresh cycle each time.
+        Converts and previews the image without uploading it to the frame.
       required: false
       default: false
       selector:

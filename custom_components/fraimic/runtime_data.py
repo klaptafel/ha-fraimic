@@ -1,4 +1,4 @@
-"""Runtime data bundle stored in hass.data per config entry."""
+"""Runtime data bundle stored on the config entry (entry.runtime_data)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,3 +30,6 @@ class FraimicRuntimeData:
     @property
     def base_url(self) -> str:
         return self.coordinator.base_url
+
+
+FraimicConfigEntry = ConfigEntry[FraimicRuntimeData]

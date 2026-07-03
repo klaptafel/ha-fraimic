@@ -6,6 +6,12 @@
 # When Dependabot opens a PR bumping a version here, apply the SAME
 # version bump by hand to manifest.json -- that's the file that actually
 # matters. This file should always mirror manifest.json's requirements.
-Pillow>=12.3.0
-numpy>=1.24.0
+#
+# EXCEPTION: Pillow. Home Assistant core bundles its own exact-pinned
+# Pillow version (see homeassistant/package_constraints.txt) and refuses
+# to install a different one for a custom integration -- requiring a
+# floor above whatever HA currently pins makes setup fail outright with
+# "Requirements for fraimic not found". Keep this floor low (only bump it
+# if you've actually verified the new minimum against a real HA install).
+Pillow>=9.1.0
 epaper-dithering>=5.0.0,<6

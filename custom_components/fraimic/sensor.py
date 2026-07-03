@@ -15,28 +15,30 @@ from homeassistant.const import (
     UnitOfElectricPotential,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
 from .coordinator import FraimicBatteryCoordinator, FraimicCoordinator
-from .runtime_data import FraimicRuntimeData, device_key
+from .entity import FraimicEntity
+from .runtime_data import FraimicConfigEntry
+
+# All state comes from the coordinators' shared poll, not per-entity I/O,
+# so there's nothing for entities of this platform to serialize against.
+PARALLEL_UPDATES = 0
 
 # Sensors backed by the fast-polling /api/battery endpoint (60s).
 # Boolean fields (charging, cable_connected) live in binary_sensor.py instead.
 BATTERY_SENSOR_DESCRIPTIONS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
         key="percent",
-        name="Battery",
+        translation_key="percent",
         device_class=SensorDeviceClass.BATTERY,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
     ),
     SensorEntityDescription(
         key="voltage_mv",
-        name="Battery Voltage",
+        translation_key="voltage_mv",
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.MILLIVOLT,
@@ -51,24 +53,27 @@ INFO_SENSOR_DESCRIPTIONS: tuple[tuple[SensorEntityDescription, tuple[str, ...]],
     (
         SensorEntityDescription(
             key="wifi_rssi",
-            name="WiFi Signal",
+            translation_key="wifi_rssi",
             device_class=SensorDeviceClass.SIGNAL_STRENGTH,
             state_class=SensorStateClass.MEASUREMENT,
             native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
             entity_category=EntityCategory.DIAGNOSTIC,
+            # HA's own entity docs use "RSSI" as the textbook example of a
+            # diagnostic entity that should ship disabled by default.
+            entity_registry_enabled_default=False,
         ),
         ("wifi", "rssi"),
     ),
     (
         SensorEntityDescription(
-            key="wifi_ip", name="IP Address", entity_category=EntityCategory.DIAGNOSTIC
+            key="wifi_ip", translation_key="wifi_ip", entity_category=EntityCategory.DIAGNOSTIC
         ),
         ("wifi", "ip"),
     ),
     (
         SensorEntityDescription(
             key="next_refresh",
-            name="Next Scheduled Refresh",
+            translation_key="next_refresh",
             device_class=SensorDeviceClass.TIMESTAMP,
         ),
         ("display", "next_refresh"),
@@ -77,9 +82,9 @@ INFO_SENSOR_DESCRIPTIONS: tuple[tuple[SensorEntityDescription, tuple[str, ...]],
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant, entry: FraimicConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    runtime: FraimicRuntimeData = hass.data[DOMAIN][entry.entry_id]
+    runtime = entry.runtime_data
 
     entities: list[SensorEntity] = [
         FraimicBatterySensor(runtime.battery_coordinator, entry, description)
@@ -91,15 +96,6 @@ async def async_setup_entry(
     ]
     entities.append(FraimicLastSeenSensor(runtime.coordinator, entry))
     async_add_entities(entities)
-
-
-def _device_info(entry: ConfigEntry, coordinator) -> DeviceInfo:
-    return DeviceInfo(
-        identifiers={(DOMAIN, device_key(entry))},
-        name="Fraimic E-Ink Canvas",
-        manufacturer="Fraimic",
-        configuration_url=coordinator.base_url,
-    )
 
 
 def _parse_timestamp(value):
@@ -122,33 +118,22 @@ def _parse_timestamp(value):
     return dt_util.as_utc(parsed)
 
 
-class FraimicBatterySensor(CoordinatorEntity[FraimicBatteryCoordinator], SensorEntity):
+class FraimicBatterySensor(FraimicEntity, SensorEntity):
     """A value from /api/battery."""
-
-    _attr_has_entity_name = True
 
     def __init__(
         self, coordinator: FraimicBatteryCoordinator, entry: ConfigEntry, description: SensorEntityDescription
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry, description.key)
         self.entity_description = description
-        self._attr_unique_id = f"{device_key(entry)}_{description.key}"
-        self._attr_device_info = _device_info(entry, coordinator)
-
-    @property
-    def available(self) -> bool:
-        # Tolerate expected deep-sleep gaps -- see coordinator.device_reachable.
-        return self.coordinator.device_reachable
 
     @property
     def native_value(self):
         return (self.coordinator.data or {}).get(self.entity_description.key)
 
 
-class FraimicInfoSensor(CoordinatorEntity[FraimicCoordinator], SensorEntity):
+class FraimicInfoSensor(FraimicEntity, SensorEntity):
     """A (possibly nested) value from /api/info."""
-
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -157,16 +142,9 @@ class FraimicInfoSensor(CoordinatorEntity[FraimicCoordinator], SensorEntity):
         description: SensorEntityDescription,
         path: tuple[str, ...],
     ) -> None:
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry, description.key)
         self.entity_description = description
         self._path = path
-        self._attr_unique_id = f"{device_key(entry)}_{description.key}"
-        self._attr_device_info = _device_info(entry, coordinator)
-
-    @property
-    def available(self) -> bool:
-        # Tolerate expected deep-sleep gaps -- see coordinator.device_reachable.
-        return self.coordinator.device_reachable
 
     @property
     def native_value(self):
@@ -205,7 +183,7 @@ class FraimicInfoSensor(CoordinatorEntity[FraimicCoordinator], SensorEntity):
         return None
 
 
-class FraimicLastSeenSensor(CoordinatorEntity[FraimicCoordinator], SensorEntity):
+class FraimicLastSeenSensor(FraimicEntity, SensorEntity):
     """When the frame was last successfully reached.
 
     Deliberately always available (even while the frame is asleep) so it
@@ -213,15 +191,12 @@ class FraimicLastSeenSensor(CoordinatorEntity[FraimicCoordinator], SensorEntity)
     exactly when that answer matters most.
     """
 
-    _attr_has_entity_name = True
-    _attr_name = "Last Seen"
+    _attr_translation_key = "last_seen"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: FraimicCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{device_key(entry)}_last_seen"
-        self._attr_device_info = _device_info(entry, coordinator)
+        super().__init__(coordinator, entry, "last_seen")
 
     @property
     def available(self) -> bool:

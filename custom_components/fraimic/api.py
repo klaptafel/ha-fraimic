@@ -14,12 +14,17 @@ person's Home Assistant is set to (see strings.json / translations/).
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+
 import async_timeout
-from aiohttp import ClientSession
+from aiohttp import ClientError, ClientSession
 
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DEFAULT_TIMEOUT, DOMAIN, EP_BATTERY, EP_IMAGE, EP_INFO, EP_REFRESH, EP_RESTART, EP_SLEEP
+
+_LOGGER = logging.getLogger(__name__)
 
 # Error codes documented by the frame's own API -- each must have a
 # matching key under "exceptions" in strings.json / translations/*.json.
@@ -32,6 +37,15 @@ _KNOWN_ERROR_KEYS = frozenset(
         "charging_cable_connected",
     }
 )
+
+# Retry budget for uploads specifically -- covers a genuine transient
+# hiccup (a dropped packet, a momentary Wi-Fi blip) while the frame is
+# awake and listening. It does NOT help if the frame is actually asleep:
+# deep sleep means its web server isn't running at all, so no amount of
+# retrying reaches it -- only a real "connection refused/timed out while
+# otherwise reachable" case benefits here.
+_UPLOAD_MAX_ATTEMPTS = 3
+_UPLOAD_RETRY_DELAYS = (2, 5)  # seconds to wait before attempt 2 and 3
 
 
 async def _request_json(
@@ -87,11 +101,33 @@ async def refresh(session: ClientSession, host: str) -> None:
 
 
 async def upload_image(session: ClientSession, host: str, bin_data: bytes) -> dict:
-    return await _request_json(
-        session,
-        "POST",
-        f"{host}{EP_IMAGE}",
-        request_timeout=60,
-        data=bin_data,
-        headers={"Content-Type": "application/octet-stream"},
-    )
+    """POST the converted image to the frame.
+
+    Retries on connection-level failures (ClientError/TimeoutError) --
+    NOT on the frame's own reported error codes (already_busy,
+    invalid_image_size, buffer_not_ready, etc.), which are meaningful
+    responses that a retry can't fix.
+    """
+    last_error: ClientError | TimeoutError | None = None
+    for attempt in range(_UPLOAD_MAX_ATTEMPTS):
+        if attempt > 0:
+            await asyncio.sleep(_UPLOAD_RETRY_DELAYS[attempt - 1])
+        try:
+            return await _request_json(
+                session,
+                "POST",
+                f"{host}{EP_IMAGE}",
+                request_timeout=60,
+                data=bin_data,
+                headers={"Content-Type": "application/octet-stream"},
+            )
+        except (ClientError, TimeoutError) as err:
+            last_error = err
+            _LOGGER.debug(
+                "Upload attempt %s/%s failed (%s): %s",
+                attempt + 1,
+                _UPLOAD_MAX_ATTEMPTS,
+                "retrying" if attempt + 1 < _UPLOAD_MAX_ATTEMPTS else "giving up",
+                err,
+            )
+    raise last_error

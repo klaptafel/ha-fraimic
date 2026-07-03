@@ -9,10 +9,14 @@
 
 ## What you get
 
-- **Media player**: `Display` *(To browse your media library and send a photo to the frame)*
-- **Buttons**: `Refresh Display` `Restart` `Sleep`
-- **Sensors**: `Battery` `Next Scheduled Refresh` `Charging` `Charging Cable Connected` `IP Address` `Last Seen` `Reachable` `Render Problem` `Wifi Signal` `Battery Voltage`
+- **Media player**: `Display` *(browse your media library and send a photo to the frame)*
+- **Buttons**: `Refresh Display` · `Restart`\*\* · `Sleep`\*\*
+- **Sensors**: `Battery` · `Battery Voltage`\* · `WiFi Signal`\* · `IP Address` · `Next Scheduled Refresh` · `Last Seen`
+- **Binary sensors**: `Charging` · `Charging Cable Connected` · `Reachable` · `Render Problem`
 - **Service**: `fraimic.send_image`
+
+\* Diagnostic, disabled by default -- enable it from the entity's settings if you want it.
+\*\* Listed under the device's "Configuration" section, not the main entity list.
 
 ## Settings (Configure)
 
