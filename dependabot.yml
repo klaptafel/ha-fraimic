@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Scans requirements.txt (Python deps used by the integration). See the
+  # comment in that file: PRs here don't auto-apply anywhere -- copy the
+  # version bump by hand into custom_components/fraimic/manifest.json too.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  # Keeps the GitHub Actions themselves (if any get added later, e.g. for
+  # HACS validation) up to date.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
