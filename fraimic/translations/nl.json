@@ -1,0 +1,100 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Fraimic E-Ink Canvas verbinden",
+        "description": "Vul het adres van je frame in, bijv. http://fraimic.local of http://192.168.1.50. Dit is een niet-officiële, door de community gebouwde integratie, niet verbonden aan of ondersteund door Fraimic.",
+        "data": {
+          "host": "Host"
+        }
+      },
+      "reconfigure": {
+        "title": "Fraimic adres wijzigen",
+        "description": "Werk het adres van je frame bij, bijvoorbeeld na een IP-wijziging.",
+        "data": {
+          "host": "Host"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kan geen verbinding maken. Controleer of het frame wakker en verbonden is."
+    },
+    "abort": {
+      "already_configured": "Dit frame is al toegevoegd.",
+      "reconfigure_successful": "Adres bijgewerkt.",
+      "wrong_device": "Dit adres hoort bij een ander fysiek Fraimic frame dan degene die je aan het herconfigureren bent."
+    }
+  },
+  "exceptions": {
+    "invalid_image_size": {
+      "message": "Bestand heeft niet de juiste grootte (verwacht exact 960.000 bytes)."
+    },
+    "file_too_large": {
+      "message": "Bestand is groter dan de 1 MB limiet van het frame."
+    },
+    "unsupported_content_type": {
+      "message": "Het frame accepteert alleen .bin bestanden, geen JPEG/PNG."
+    },
+    "buffer_not_ready": {
+      "message": "Frame is nog bezig (bijv. midden in een refresh). Probeer het zo opnieuw."
+    },
+    "charging_cable_connected": {
+      "message": "Kan niet in slaap: er zit een oplaadkabel in het frame."
+    },
+    "unknown_error": {
+      "message": "Fraimic frame gaf een fout terug: {error_code}"
+    },
+    "http_error": {
+      "message": "Fraimic frame antwoordde met HTTP {status}."
+    },
+    "file_not_found": {
+      "message": "Bestand niet gevonden: {path}"
+    },
+    "path_not_allowed": {
+      "message": "Pad '{path}' staat niet in Home Assistant's allowlist_external_dirs."
+    },
+    "unexpected_error": {
+      "message": "Onverwachte fout: {error}"
+    },
+    "already_busy": {
+      "message": "Nog bezig met de vorige afbeelding, wacht heel even en probeer opnieuw."
+    }
+  },
+  "services": {
+    "send_image": {
+      "name": "Afbeelding versturen",
+      "description": "Converteert een lokaal beeldbestand naar het Spectra 6 .bin formaat en stuurt het naar het Fraimic frame. Handig vanuit automations/scripts.",
+      "fields": {
+        "path": {
+          "name": "Pad",
+          "description": "Volledig pad naar het beeldbestand (jpg/png/etc.), bijv. /config/www/fraimic/foto.jpg. Moet binnen een toegestane map staan (allowlist_external_dirs of /config/www)."
+        },
+        "fit": {
+          "name": "Fit",
+          "description": "Hoe het beeld in het 1200x1600 frame past: fit (hele beeld zichtbaar, opgevuld met zwart -- CSS object-fit: contain) of fill (vult het frame, randen worden afgesneden -- CSS object-fit: cover)."
+        },
+        "dither": {
+          "name": "Dithering",
+          "description": "Ditheralgoritme om het beeld naar 6 kleuren terug te brengen, via de epaper-dithering bibliotheek (valt terug op floyd_steinberg voor ordered/burkes/stucki/sierra/sierra_lite/jarvis_judice_ninke als die bibliotheek niet beschikbaar is): none (harde randen, banding), floyd_steinberg (meest gebruikt, goede standaard), atkinson (matcht de originele Fraimic conversietool), ordered (snel, zichtbaar patroon), burkes, stucki (brede foutverspreiding), sierra, sierra_lite (snel, eenvoudig), jarvis_judice_ninke (vloeiende verlopen, traagst)."
+        },
+        "dry_run": {
+          "name": "Testrun (dry run)",
+          "description": "Converteert de afbeelding en werkt de foto van de Display entity gewoon bij, maar slaat de daadwerkelijke upload naar het frame over. Handig om fit/dither/device_orientation resultaten te bekijken zonder telkens de 20-30 sec refresh-cyclus van het frame af te wachten."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Fraimic weergave-standaarden",
+        "description": "Gebruikt bij het tikken op een afbeelding in de media browser, die geen extra parameters per tap kan meegeven. De fraimic.send_image service kan fit/dither altijd per aanroep overrulen (oriëntatie komt altijd hiervandaan, want dat is een fysiek gegeven over het frame, niet iets dat per foto verschilt).",
+        "data": {
+          "device_orientation": "Oriëntatie apparaat (fysieke montage)",
+          "default_fit": "Standaard fit",
+          "default_dither": "Standaard dithering"
+        }
+      }
+    }
+  }
+}
