@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Fraimic frame verbinden",
-        "description": "Gebruik het adres van het frame, bv. http://fraimic.local -- dit blijft werken ook als het frame later een nieuw IP krijgt. Heb je meer dan één frame, check dan eerst de hostname van elk frame in de DHCP-lijst van je router (fraimic.local wijst altijd naar maar één ervan), of gebruik een vast IP-adres.",
+        "description": "Gebruik het adres van het frame, bv. fraimic.local -- dit blijft werken ook als het frame later een nieuw IP krijgt. Heb je meer dan één frame, check dan eerst de hostname van elk frame in de DHCP-lijst van je router (fraimic.local wijst altijd naar maar één ervan), of gebruik een vast IP-adres.",
         "data": {
           "host": "Host"
         }
       },
       "reconfigure": {
         "title": "Fraimic adres wijzigen",
-        "description": "Werk het adres van het frame bij. http://fraimic.local blijft werken bij IP-wijzigingen voor één frame; bij meerdere frames gebruik je de eigen hostname van elk frame of een vast IP-adres.",
+        "description": "Werk het adres van het frame bij. fraimic.local blijft werken bij IP-wijzigingen voor één frame; bij meerdere frames gebruik je de eigen hostname van elk frame of een vast IP-adres.",
         "data": {
           "host": "Host"
         }

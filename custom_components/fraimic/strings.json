@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Connect Fraimic frame",
-        "description": "Use the frame's address, e.g. http://fraimic.local -- this keeps working even if the frame later gets a new IP. If you have more than one frame, check each one's own hostname in your router's DHCP list first (fraimic.local always points to just one of them), or use a fixed IP instead.",
+        "description": "Use the frame's address, e.g. fraimic.local -- this keeps working even if the frame later gets a new IP. If you have more than one frame, check each one's own hostname in your router's DHCP list first (fraimic.local always points to just one of them), or use a fixed IP instead.",
         "data": {
           "host": "Host"
         }
       },
       "reconfigure": {
         "title": "Change Fraimic address",
-        "description": "Update the frame's address. http://fraimic.local keeps working across IP changes for a single frame; with more than one frame, use each frame's own hostname or a fixed IP.",
+        "description": "Update the frame's address. fraimic.local keeps working across IP changes for a single frame; with more than one frame, use each frame's own hostname or a fixed IP.",
         "data": {
           "host": "Host"
         }

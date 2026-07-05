@@ -49,6 +49,23 @@ async def test_user_step_strips_trailing_slash(hass: HomeAssistant, aioclient_mo
     assert result["data"] == {CONF_HOST: "http://1.2.3.4"}
 
 
+async def test_user_step_defaults_to_http_scheme(hass: HomeAssistant, aioclient_mock) -> None:
+    """A bare hostname (e.g. fraimic.local, as the form's own placeholder
+    suggests) has no scheme -- aiohttp can't request that at all, so this
+    must default to http:// rather than surfacing a confusing
+    cannot_connect for exactly the input the UI recommends."""
+    aioclient_mock.get("http://fraimic.local/api/info", json=INFO_A)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_HOST: "fraimic.local"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {CONF_HOST: "http://fraimic.local"}
+
+
 async def test_user_step_cannot_connect(hass: HomeAssistant, aioclient_mock) -> None:
     aioclient_mock.get("http://1.2.3.4/api/info", exc=aiohttp.ClientError)
 

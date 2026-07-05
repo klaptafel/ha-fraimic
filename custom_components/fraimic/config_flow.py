@@ -31,7 +31,19 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_SCHEMA = vol.Schema({vol.Required(CONF_HOST, default="http://fraimic.local"): str})
+STEP_USER_SCHEMA = vol.Schema({vol.Required(CONF_HOST, default="fraimic.local"): str})
+
+
+def _normalize_host(host: str) -> str:
+    """Strip incidental whitespace/trailing slash, and default to http://
+    if no scheme was typed -- the frame has no https support, and
+    requiring the scheme just to type a bare hostname like fraimic.local
+    is friction with no benefit (aiohttp raises on a schemeless URL
+    otherwise, which would surface as a confusing "cannot_connect")."""
+    host = host.strip().rstrip("/")
+    if not host.startswith(("http://", "https://")):
+        host = f"http://{host}"
+    return host
 
 
 async def _validate_host(hass: HomeAssistant, host: str) -> dict[str, Any]:
@@ -71,7 +83,7 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            host = user_input[CONF_HOST].rstrip("/")
+            host = _normalize_host(user_input[CONF_HOST])
             info, errors = await _try_validate(self.hass, host)
             if info is not None:
                 await self.async_set_unique_id(_device_key(info, host))
@@ -92,7 +104,7 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         reconfigure_entry = self._get_reconfigure_entry()
 
         if user_input is not None:
-            host = user_input[CONF_HOST].rstrip("/")
+            host = _normalize_host(user_input[CONF_HOST])
             info, errors = await _try_validate(self.hass, host)
             if info is not None:
                 await self.async_set_unique_id(_device_key(info, host))
