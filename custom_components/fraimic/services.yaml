@@ -6,7 +6,8 @@ send_image:
   name: Send image
   description: >-
     Sends a local image file to the frame, converting it to the
-    Spectra 6 format first.
+    Spectra 6 format first. Runs in the background and waits up to
+    10 minutes for the frame to wake if it's asleep.
   target:
     entity:
       domain: media_player

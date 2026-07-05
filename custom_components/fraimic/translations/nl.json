@@ -87,7 +87,7 @@
   "services": {
     "send_image": {
       "name": "Afbeelding versturen",
-      "description": "Stuurt een lokaal beeldbestand naar het frame, eerst geconverteerd naar het Spectra 6 formaat.",
+      "description": "Stuurt een lokaal beeldbestand naar het frame, eerst geconverteerd naar het Spectra 6 formaat. Draait op de achtergrond en wacht tot 10 minuten tot het frame wakker wordt als het slaapt.",
       "fields": {
         "path": {
           "name": "Pad",

@@ -60,6 +60,10 @@ async def test_send_image_uploads_and_updates_picture(
         {"entity_id": _entity_id(hass), "path": path, "fit": "fill", "dither": "none"},
         blocking=True,
     )
+    # The service call only queues the send (see _queue_send) -- the actual
+    # conversion+upload runs in a background task tracked on the config
+    # entry, so wait for it before asserting on the outcome.
+    await hass.async_block_till_done()
 
     upload_calls = [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
     assert len(upload_calls) == 1
@@ -74,17 +78,12 @@ async def test_send_image_uploads_and_updates_picture(
 
 
 async def test_media_title_reflects_sending_then_sent(
-    hass: HomeAssistant, aioclient_mock, tmp_path, monkeypatch
+    hass: HomeAssistant, aioclient_mock, tmp_path
 ) -> None:
     """media_title is the only free (no extra subsystems, always-visible-if-
     you-check-the-entity) confirmation that a tap landed and is in progress,
     since a real toast isn't something a backend-only integration can
     trigger outside of service-call failures."""
-    import asyncio
-    import threading
-
-    from custom_components.fraimic import media_player as media_player_module
-
     await _setup(hass, aioclient_mock)
     aioclient_mock.post(f"{HOST}/api/image", json={})
     hass.config.allowlist_external_dirs.add(str(tmp_path))
@@ -93,29 +92,17 @@ async def test_media_title_reflects_sending_then_sent(
 
     assert entity.media_title is None
 
-    started = threading.Event()
-    release = threading.Event()
-    real_convert_image = media_player_module.convert_image
-
-    def slow_convert_image(*args, **kwargs):
-        started.set()
-        release.wait(timeout=5)
-        return real_convert_image(*args, **kwargs)
-
-    monkeypatch.setattr(media_player_module, "convert_image", slow_convert_image)
-
-    call_task = asyncio.create_task(
-        hass.services.async_call(
-            DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
-        )
+    await hass.services.async_call(
+        DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
     )
-    await hass.async_add_executor_job(started.wait, 5)
-
+    # The service call only queues the send -- HA's eager task execution
+    # means the background task has already run up to its first real
+    # suspension point (the executor job) by the time this returns, so the
+    # "sending" state is already visible without needing to synchronize on
+    # a slowed-down convert_image.
     assert entity.media_title == "Sending photo.jpg…"
 
-    release.set()
-    await call_task
-
+    await hass.async_block_till_done()
     assert entity.media_title.startswith("Sent ")
 
 
@@ -132,6 +119,7 @@ async def test_send_image_dry_run_skips_upload(
         {"entity_id": _entity_id(hass), "path": path, "dry_run": True},
         blocking=True,
     )
+    await hass.async_block_till_done()
 
     upload_calls = [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
     assert len(upload_calls) == 0
@@ -161,6 +149,123 @@ async def test_send_image_path_not_allowed(hass: HomeAssistant, aioclient_mock, 
             DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
         )
     assert exc_info.value.translation_key == "path_not_allowed"
+
+
+async def test_send_image_waits_out_transient_failures_then_succeeds(
+    hass: HomeAssistant, aioclient_mock, tmp_path, monkeypatch
+) -> None:
+    """_upload_waiting_for_frame's outer retry loop must keep going past
+    api.upload_image's own short internal retry budget, since the frame
+    only wakes on its own schedule -- not on a retried request."""
+    import aiohttp
+    from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMockResponse
+
+    async def instant_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("asyncio.sleep", instant_sleep)
+
+    attempts = {"count": 0}
+
+    async def flaky_then_ok(method, url, data):
+        attempts["count"] += 1
+        if attempts["count"] < 5:
+            return AiohttpClientMockResponse(method, url, exc=aiohttp.ClientError("asleep"))
+        return AiohttpClientMockResponse(method, url, json={})
+
+    await _setup(hass, aioclient_mock)
+    aioclient_mock.post(f"{HOST}/api/image", side_effect=flaky_then_ok)
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = _write_test_image(tmp_path)
+
+    await hass.services.async_call(
+        DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert attempts["count"] == 5
+    entity = _get_entity(hass)
+    assert entity.media_title.startswith("Sent ")
+    assert entity._runtime.image_store.content is not None
+
+
+async def test_send_image_gives_up_after_wake_wait_timeout(
+    hass: HomeAssistant, aioclient_mock, tmp_path, monkeypatch
+) -> None:
+    import aiohttp
+    from datetime import timedelta
+
+    from custom_components.fraimic import media_player as media_player_module
+
+    async def instant_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("asyncio.sleep", instant_sleep)
+    monkeypatch.setattr(media_player_module, "WAKE_WAIT_TIMEOUT", timedelta(seconds=0))
+
+    await _setup(hass, aioclient_mock)
+    aioclient_mock.post(f"{HOST}/api/image", exc=aiohttp.ClientError("asleep"))
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = _write_test_image(tmp_path)
+
+    await hass.services.async_call(
+        DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    entity = _get_entity(hass)
+    assert entity.media_title == "Frame never woke up, gave up: photo.jpg"
+    state = hass.states.get(_entity_id(hass))
+    assert state.state == "idle"
+
+    # The lock must be released so a later attempt isn't blocked forever.
+    assert not entity._busy_lock.locked()
+
+
+async def test_send_image_frame_error_is_not_retried(
+    hass: HomeAssistant, aioclient_mock, tmp_path
+) -> None:
+    """A real frame-reported error (not a connection issue) must fail
+    immediately -- retrying for up to 10 minutes can't fix a genuinely
+    invalid request."""
+    await _setup(hass, aioclient_mock)
+    aioclient_mock.post(f"{HOST}/api/image", json={"error": "buffer_not_ready"})
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = _write_test_image(tmp_path)
+
+    await hass.services.async_call(
+        DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    entity = _get_entity(hass)
+    assert entity.media_title == "Frame never woke up, gave up: photo.jpg"
+    upload_calls = [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
+    assert len(upload_calls) == 1  # no retries at all
+
+
+async def test_send_image_unexpected_error_is_caught(
+    hass: HomeAssistant, aioclient_mock, tmp_path, monkeypatch
+) -> None:
+    from custom_components.fraimic import media_player as media_player_module
+
+    def broken_convert_image(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(media_player_module, "convert_image", broken_convert_image)
+
+    await _setup(hass, aioclient_mock)
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = _write_test_image(tmp_path)
+
+    await hass.services.async_call(
+        DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    entity = _get_entity(hass)
+    assert entity.media_title == "Frame never woke up, gave up: photo.jpg"
+    assert not entity._busy_lock.locked()
 
 
 async def test_send_image_already_busy(hass: HomeAssistant, aioclient_mock, tmp_path) -> None:
@@ -238,6 +343,7 @@ async def test_play_media_local_file_uses_options_defaults(
 
     entity = _get_entity(hass)
     await entity.async_play_media("image/jpeg", path)
+    await hass.async_block_till_done()
 
     upload_calls = [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
     assert len(upload_calls) == 1
@@ -259,6 +365,7 @@ async def test_media_image_and_title_before_and_after_send(
     await hass.services.async_call(
         DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
     )
+    await hass.async_block_till_done()
 
     content, content_type = await entity.async_get_media_image()
     assert content is not None
@@ -276,6 +383,7 @@ async def test_play_media_via_http_url(hass: HomeAssistant, aioclient_mock, tmp_
 
     entity = _get_entity(hass)
     await entity.async_play_media("image/jpeg", "http://example.com/photo.jpg")
+    await hass.async_block_till_done()
 
     upload_calls = [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
     assert len(upload_calls) == 1
@@ -356,6 +464,7 @@ async def test_play_media_via_media_source(hass: HomeAssistant, aioclient_mock, 
 
     entity = _get_entity(hass)
     await entity.async_play_media("image/jpeg", "media-source://media_source/local/photo.jpg")
+    await hass.async_block_till_done()
 
     upload_calls = [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
     assert len(upload_calls) == 1

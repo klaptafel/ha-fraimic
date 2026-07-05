@@ -16,9 +16,11 @@ import asyncio
 import logging
 import os
 import urllib.parse
+from datetime import timedelta
 
 import async_timeout
 import voluptuous as vol
+from aiohttp import ClientError
 
 from homeassistant.components import media_source
 from homeassistant.components.media_player import (
@@ -36,6 +38,7 @@ from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.network import get_url
+from homeassistant.util import dt as dt_util
 
 from . import api
 from .const import (
@@ -80,6 +83,15 @@ SEND_IMAGE_SCHEMA = {
 
 _MEDIA_SOURCE_PREFIX = "media-source://media_source/"
 
+# The frame only wakes on its own schedule or a physical tap -- never on
+# an incoming request -- so a failed upload while it's asleep can't be
+# fixed by retrying quickly (see api.upload_image's own short retry for
+# that). Instead, if it's asleep *right now*, keep retrying at this
+# interval until it happens to wake on its own, up to this total budget,
+# before giving up.
+WAKE_WAIT_TIMEOUT = timedelta(minutes=10)
+WAKE_WAIT_INTERVAL = 30
+
 
 def _display_name(source: str) -> str:
     """Best-effort human-readable name for a path/URL/media-source id, for
@@ -115,6 +127,7 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
         self._busy_lock = asyncio.Lock()
         self._attr_state = MediaPlayerState.IDLE
         self._sending: str | None = None
+        self._send_failed: str | None = None
 
     # -- "album art" for the last image sent, shown as entity_picture --
 
@@ -139,6 +152,8 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
         # trigger outside of service-call failures.
         if self._sending is not None:
             return f"Sending {self._sending}…"
+        if self._send_failed is not None:
+            return f"Frame never woke up, gave up: {self._send_failed}"
         updated_at = self._runtime.image_store.updated_at
         if updated_at is None:
             return None
@@ -175,7 +190,7 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
 
         fit = self._entry.options.get(CONF_DEFAULT_FIT, DEFAULT_FIT)
         dither = self._entry.options.get(CONF_DEFAULT_DITHER, DEFAULT_DITHER)
-        await self._convert_and_send(raw_bytes, fit, dither, source=media_id)
+        await self._queue_send(raw_bytes, fit, dither, source=media_id)
 
     async def async_send_local_file(
         self,
@@ -198,11 +213,43 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                 translation_placeholders={"path": path},
             )
         raw_bytes = await self.hass.async_add_executor_job(self._read_local_file, path)
-        await self._convert_and_send(raw_bytes, fit, dither, dry_run=dry_run, source=path)
+        await self._queue_send(raw_bytes, fit, dither, dry_run=dry_run, source=path)
+
+    async def _queue_send(
+        self, raw_bytes: bytes, fit: str, dither: str, dry_run: bool = False, source: str = ""
+    ) -> None:
+        """Reject immediately if already busy, otherwise hand off to a
+        background task and return right away.
+
+        The frame is often asleep when a photo is picked -- waiting for it
+        to wake (see _upload_waiting_for_frame) can take minutes, and
+        blocking the triggering service call/media browser tap for that
+        long would be a worse experience than a queued background send.
+        """
+        if self._busy_lock.locked():
+            # Surfaces as a visible error toast in the UI -- important,
+            # since otherwise repeated taps while a conversion+upload is
+            # already running (which takes several seconds, longer with
+            # atkinson dithering, or minutes if it's waiting for the frame
+            # to wake) silently pile up into a backlog with no feedback
+            # that anything happened.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="already_busy"
+            )
+        await self._busy_lock.acquire()
+        # Tracked on the config entry (not a bare hass.async_create_task) so
+        # HA waits for/cancels it on unload instead of leaving it dangling.
+        self._entry.async_create_task(
+            self.hass,
+            self._convert_and_send(raw_bytes, fit, dither, dry_run=dry_run, source=source),
+            name="fraimic_convert_and_send",
+        )
 
     async def _convert_and_send(
         self, raw_bytes: bytes, fit: str, dither: str, dry_run: bool = False, source: str = ""
     ) -> None:
+        """Runs as a background task -- _busy_lock is already held by the
+        caller (_queue_send) and is released here, regardless of outcome."""
         # device_orientation isn't caller-supplied -- it's a fact about
         # how the frame is physically mounted, not something that varies
         # per image, so it always comes straight from Options rather than
@@ -212,38 +259,58 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
             CONF_DEVICE_ORIENTATION, DEFAULT_DEVICE_ORIENTATION
         )
 
-        if self._busy_lock.locked():
-            # Surfaces as a visible error toast in the UI -- important,
-            # since otherwise repeated taps while a conversion+upload is
-            # already running (which takes several seconds, longer with
-            # atkinson dithering) silently pile up into a backlog with no
-            # feedback that anything happened.
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="already_busy"
-            )
-        async with self._busy_lock:
-            self._attr_state = MediaPlayerState.BUFFERING
-            self._sending = _display_name(source)
-            self.async_write_ha_state()
-            try:
-                bin_data, preview_png = await self.hass.async_add_executor_job(
-                    lambda: convert_image(
-                        raw_bytes,
-                        fit=fit,
-                        device_orientation=device_orientation,
-                        dither=dither,
-                    )
+        self._attr_state = MediaPlayerState.BUFFERING
+        self._sending = _display_name(source)
+        self._send_failed = None
+        self.async_write_ha_state()
+        try:
+            bin_data, preview_png = await self.hass.async_add_executor_job(
+                lambda: convert_image(
+                    raw_bytes,
+                    fit=fit,
+                    device_orientation=device_orientation,
+                    dither=dither,
                 )
-                if dry_run:
-                    _LOGGER.debug("dry_run=True: skipping upload to %s", self._runtime.base_url)
-                else:
-                    session = async_get_clientsession(self.hass)
-                    await api.upload_image(session, self._runtime.base_url, bin_data)
-                await self._runtime.image_store.async_set(preview_png)
-            finally:
-                self._sending = None
-                self._attr_state = MediaPlayerState.IDLE
-                self.async_write_ha_state()
+            )
+            if dry_run:
+                _LOGGER.debug("dry_run=True: skipping upload to %s", self._runtime.base_url)
+            else:
+                await self._upload_waiting_for_frame(bin_data)
+            await self._runtime.image_store.async_set(preview_png)
+        except (ClientError, TimeoutError):
+            _LOGGER.warning(
+                "Fraimic frame at %s never woke up within %s -- gave up sending %s",
+                self._runtime.base_url,
+                WAKE_WAIT_TIMEOUT,
+                self._sending,
+            )
+            self._send_failed = self._sending
+        except HomeAssistantError as err:
+            _LOGGER.warning("Fraimic failed to send %s: %s", self._sending, err)
+            self._send_failed = self._sending
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Fraimic: unexpected error sending %s", self._sending)
+            self._send_failed = self._sending
+        finally:
+            self._sending = None
+            self._attr_state = MediaPlayerState.IDLE
+            self._busy_lock.release()
+            self.async_write_ha_state()
+
+    async def _upload_waiting_for_frame(self, bin_data: bytes) -> None:
+        """Upload, retrying on connection failures until the frame wakes up
+        on its own (a tap or its own refresh schedule -- never an incoming
+        request) or WAKE_WAIT_TIMEOUT elapses, whichever comes first."""
+        session = async_get_clientsession(self.hass)
+        deadline = dt_util.utcnow() + WAKE_WAIT_TIMEOUT
+        while True:
+            try:
+                await api.upload_image(session, self._runtime.base_url, bin_data)
+                return
+            except (ClientError, TimeoutError):
+                if dt_util.utcnow() >= deadline:
+                    raise
+                await asyncio.sleep(WAKE_WAIT_INTERVAL)
 
     # -- fetching media bytes --
 
