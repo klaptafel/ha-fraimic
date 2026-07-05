@@ -28,16 +28,28 @@ def device_info(entry: ConfigEntry, base_url: str) -> DeviceInfo:
 
 
 class FraimicEntity(CoordinatorEntity):
-    """Common base for entities backed by one of the Fraimic coordinators."""
+    """Common base for entities backed by one of the Fraimic coordinators.
+
+    Set `_fraimic_always_available = True` on a subclass to opt out of the
+    default 72h-tolerant model entirely, for entities whose whole job is to
+    surface *that* the frame is unreachable (FraimicLastSeenSensor,
+    FraimicMediaPlayer, FraimicStatusSensor) -- if one of those went
+    unavailable via the default model, the exact message/value it exists to
+    show would be replaced by HA's own generic "unavailable" instead.
+    """
 
     _attr_has_entity_name = True
+    _fraimic_always_available = False
 
     def __init__(self, coordinator, entry: ConfigEntry, key: str) -> None:
         super().__init__(coordinator)
+        self._entry = entry
         self._attr_unique_id = entity_unique_id(entry, key)
         self._attr_device_info = device_info(entry, coordinator.base_url)
 
     @property
     def available(self) -> bool:
+        if self._fraimic_always_available:
+            return True
         # Tolerate expected deep-sleep gaps -- see coordinator.device_reachable.
         return self.coordinator.device_reachable

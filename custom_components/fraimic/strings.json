@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Connect Fraimic frame",
-        "description": "Use the frame's IP address, not fraimic.local -- that hostname can point to the wrong frame if you have more than one. Find the IP on the frame's web interface or your router's DHCP list.",
+        "description": "Use the frame's address, e.g. http://fraimic.local -- this keeps working even if the frame later gets a new IP. If you have more than one frame, check each one's own hostname in your router's DHCP list first (fraimic.local always points to just one of them), or use a fixed IP instead.",
         "data": {
           "host": "Host"
         }
       },
       "reconfigure": {
         "title": "Change Fraimic address",
-        "description": "Update the frame's address. Use its IP, not fraimic.local.",
+        "description": "Update the frame's address. http://fraimic.local keeps working across IP changes for a single frame; with more than one frame, use each frame's own hostname or a fixed IP.",
         "data": {
           "host": "Host"
         }
@@ -32,7 +32,8 @@
       "wifi_rssi": { "name": "WiFi Signal" },
       "wifi_ip": { "name": "IP Address" },
       "next_refresh": { "name": "Next Scheduled Refresh" },
-      "last_seen": { "name": "Last Seen" }
+      "last_seen": { "name": "Last Seen" },
+      "send_status": { "name": "Send Status" }
     },
     "binary_sensor": {
       "charging": { "name": "Charging" },

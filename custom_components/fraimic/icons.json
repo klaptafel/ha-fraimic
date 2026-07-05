@@ -2,7 +2,8 @@
   "entity": {
     "sensor": {
       "wifi_ip": { "default": "mdi:ip-network" },
-      "voltage_mv": { "default": "mdi:current-dc" }
+      "voltage_mv": { "default": "mdi:current-dc" },
+      "send_status": { "default": "mdi:information-outline" }
     },
     "button": {
       "sleep": { "default": "mdi:sleep" },

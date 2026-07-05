@@ -15,12 +15,13 @@ from homeassistant.const import (
     UnitOfElectricPotential,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .coordinator import FraimicBatteryCoordinator, FraimicCoordinator
 from .entity import FraimicEntity
-from .runtime_data import FraimicConfigEntry
+from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
 
 # All state comes from the coordinators' shared poll, not per-entity I/O,
 # so there's nothing for entities of this platform to serialize against.
@@ -95,6 +96,7 @@ async def async_setup_entry(
         for description, path in INFO_SENSOR_DESCRIPTIONS
     ]
     entities.append(FraimicLastSeenSensor(runtime.coordinator, entry))
+    entities.append(FraimicStatusSensor(runtime, entry))
     async_add_entities(entities)
 
 
@@ -194,14 +196,37 @@ class FraimicLastSeenSensor(FraimicEntity, SensorEntity):
     _attr_translation_key = "last_seen"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _fraimic_always_available = True
 
     def __init__(self, coordinator: FraimicCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator, entry, "last_seen")
 
     @property
-    def available(self) -> bool:
-        return True
-
-    @property
     def native_value(self):
         return self.coordinator.last_success
+
+
+class FraimicStatusSensor(FraimicEntity, SensorEntity):
+    """Plain-text mirror of the media player's status (FraimicRuntimeData.
+    status_text) -- same information, just a first-class entity instead of
+    tucked away in the media player's more-info dialog, so it's easy to
+    put on a dashboard or reference in an automation/template.
+    """
+
+    _attr_translation_key = "send_status"
+    _fraimic_always_available = True
+
+    def __init__(self, runtime: FraimicRuntimeData, entry: ConfigEntry) -> None:
+        super().__init__(runtime.coordinator, entry, "send_status")
+        self._runtime = runtime
+        self._send_status_signal = send_status_signal(entry)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, self._send_status_signal, self.async_write_ha_state)
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        return self._runtime.status_text

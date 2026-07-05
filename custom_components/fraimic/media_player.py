@@ -36,6 +36,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.network import get_url
 from homeassistant.util import dt as dt_util
@@ -61,7 +62,7 @@ from .const import (
 )
 from .entity import FraimicEntity
 from .image_converter import convert_image
-from .runtime_data import FraimicConfigEntry, FraimicRuntimeData
+from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -119,15 +120,19 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
     )
     _attr_media_content_type = MediaType.IMAGE
     _attr_translation_key = "display"
+    # An unavailable media player can't be browsed or played to from the
+    # UI -- that would block picking an image for the entire time the
+    # frame happens to be asleep, defeating _upload_waiting_for_frame's
+    # whole point of letting you queue a send and have it wait out the
+    # sleep itself. See FraimicEntity for the general reasoning.
+    _fraimic_always_available = True
 
     def __init__(self, runtime: FraimicRuntimeData, entry: ConfigEntry) -> None:
         super().__init__(runtime.coordinator, entry, "display")
         self._runtime = runtime
-        self._entry = entry
         self._busy_lock = asyncio.Lock()
         self._attr_state = MediaPlayerState.IDLE
-        self._sending: str | None = None
-        self._send_failed: str | None = None
+        self._send_status_signal = send_status_signal(entry)
 
     # -- "album art" for the last image sent, shown as entity_picture --
 
@@ -144,20 +149,10 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
 
     @property
     def media_title(self) -> str | None:
-        # While a conversion+upload is in progress, reflects that instead
-        # of the last-sent timestamp -- the only free (no extra
-        # subsystems, no dependency on the user having a notification
-        # panel open) confirmation that a tap actually landed, since a
-        # real toast isn't something a backend-only integration can
-        # trigger outside of service-call failures.
-        if self._sending is not None:
-            return f"Sending {self._sending}…"
-        if self._send_failed is not None:
-            return f"Frame never woke up, gave up: {self._send_failed}"
-        updated_at = self._runtime.image_store.updated_at
-        if updated_at is None:
-            return None
-        return f"Sent {updated_at.strftime('%Y-%m-%d %H:%M')}"
+        # Delegates to FraimicRuntimeData.status_text -- shared with
+        # sensor.py's FraimicStatusSensor so the logic lives in exactly
+        # one place, not duplicated per-entity.
+        return self._runtime.status_text
 
     # -- browsing and playback --
 
@@ -259,10 +254,11 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
             CONF_DEVICE_ORIENTATION, DEFAULT_DEVICE_ORIENTATION
         )
 
+        status = self._runtime.send_status
         self._attr_state = MediaPlayerState.BUFFERING
-        self._sending = _display_name(source)
-        self._send_failed = None
-        self.async_write_ha_state()
+        status.sending = _display_name(source)
+        status.send_failed = None
+        self._notify_send_status_changed()
         try:
             bin_data, preview_png = await self.hass.async_add_executor_job(
                 lambda: convert_image(
@@ -282,34 +278,47 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                 "Fraimic frame at %s never woke up within %s -- gave up sending %s",
                 self._runtime.base_url,
                 WAKE_WAIT_TIMEOUT,
-                self._sending,
+                status.sending,
             )
-            self._send_failed = self._sending
+            status.send_failed = status.sending
         except HomeAssistantError as err:
-            _LOGGER.warning("Fraimic failed to send %s: %s", self._sending, err)
-            self._send_failed = self._sending
+            _LOGGER.warning("Fraimic failed to send %s: %s", status.sending, err)
+            status.send_failed = status.sending
         except Exception:  # noqa: BLE001
-            _LOGGER.exception("Fraimic: unexpected error sending %s", self._sending)
-            self._send_failed = self._sending
+            _LOGGER.exception("Fraimic: unexpected error sending %s", status.sending)
+            status.send_failed = status.sending
         finally:
-            self._sending = None
+            status.sending = None
+            status.waiting_for_wake = False
             self._attr_state = MediaPlayerState.IDLE
             self._busy_lock.release()
-            self.async_write_ha_state()
+            self._notify_send_status_changed()
+
+    def _notify_send_status_changed(self) -> None:
+        """Write this entity's own state, and poke any other entity (e.g.
+        sensor.py's FraimicStatusSensor) reflecting the same
+        FraimicRuntimeData.status_text, since a plain
+        self.async_write_ha_state() only refreshes this entity."""
+        self.async_write_ha_state()
+        async_dispatcher_send(self.hass, self._send_status_signal)
 
     async def _upload_waiting_for_frame(self, bin_data: bytes) -> None:
         """Upload, retrying on connection failures until the frame wakes up
         on its own (a tap or its own refresh schedule -- never an incoming
         request) or WAKE_WAIT_TIMEOUT elapses, whichever comes first."""
+        status = self._runtime.send_status
         session = async_get_clientsession(self.hass)
         deadline = dt_util.utcnow() + WAKE_WAIT_TIMEOUT
         while True:
             try:
                 await api.upload_image(session, self._runtime.base_url, bin_data)
+                status.waiting_for_wake = False
                 return
             except (ClientError, TimeoutError):
                 if dt_util.utcnow() >= deadline:
                     raise
+                status.waiting_for_wake = True
+                self._notify_send_status_changed()
                 await asyncio.sleep(WAKE_WAIT_INTERVAL)
 
     # -- fetching media bytes --

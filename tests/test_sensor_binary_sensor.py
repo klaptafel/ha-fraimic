@@ -7,6 +7,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.fraimic.const import CONF_HOST, DOMAIN
 
+from .conftest import write_test_image
+
 HOST = "http://1.2.3.4"
 INFO = {
     "device": {"device_key": "abc123"},
@@ -105,6 +107,74 @@ async def test_binary_sensors(hass: HomeAssistant, aioclient_mock) -> None:
     assert render_problem_state.state == "on"
     assert render_problem_state.attributes["render_attempts"] == 10
     assert render_problem_state.attributes["render_failures"] == 2
+
+
+async def test_send_status_sensor_registration_and_default_value(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    await _setup(hass, aioclient_mock)
+
+    entity_reg = er.async_get(hass)
+    entry = entity_reg.async_get(_entity_id(hass, "sensor", "send_status"))
+    assert entry.disabled_by is None
+    assert entry.entity_category is None
+
+    state = hass.states.get(_entity_id(hass, "sensor", "send_status"))
+    assert state.state == "unknown"  # nothing sent yet -- status_text is None
+
+
+async def test_send_status_sensor_stays_available_when_frame_unreachable(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """Like the media player it mirrors, this must stay available even
+    when unreachable -- otherwise the exact message it exists to show
+    ("Frame unreachable...") would never be visible."""
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.fraimic.const import UNAVAILABLE_AFTER
+
+    entry = await _setup(hass, aioclient_mock)
+    entry.runtime_data.coordinator._last_success = dt_util.utcnow() - (
+        UNAVAILABLE_AFTER + timedelta(minutes=1)
+    )
+    entry.runtime_data.coordinator.async_update_listeners()
+    await hass.async_block_till_done()
+
+    state = hass.states.get(_entity_id(hass, "sensor", "send_status"))
+    assert state.state == "Frame unreachable -- tap it to wake it up"
+
+
+async def test_send_status_sensor_updates_live_via_dispatcher(
+    hass: HomeAssistant, aioclient_mock, tmp_path
+) -> None:
+    """The sensor must reflect a send in progress immediately -- via the
+    dispatcher signal media_player.py fires -- not just on the next
+    coordinator poll (which could be minutes away)."""
+    entry = await _setup(hass, aioclient_mock)
+    aioclient_mock.post(f"{HOST}/api/image", json={})
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = write_test_image(tmp_path)
+
+    media_player_entity_id = _entity_id(hass, "media_player", "display")
+
+    await hass.services.async_call(
+        DOMAIN,
+        "send_image",
+        {"entity_id": media_player_entity_id, "path": path},
+        blocking=True,
+    )
+    # No coordinator.async_update_listeners() call here on purpose -- the
+    # sensor should already reflect "sending" purely from the dispatcher
+    # signal fired inside media_player.py's background task.
+    send_status_state = hass.states.get(_entity_id(hass, "sensor", "send_status"))
+    media_title = entry.runtime_data.status_text
+    assert send_status_state.state == media_title == "Sending photo.jpg…"
+
+    await hass.async_block_till_done()
+    send_status_state = hass.states.get(_entity_id(hass, "sensor", "send_status"))
+    assert send_status_state.state.startswith("Sent ")
 
 
 async def test_entities_unavailable_when_frame_unreachable_too_long(

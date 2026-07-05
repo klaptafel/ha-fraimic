@@ -11,7 +11,7 @@
 
 - **Media player**: `Display` *(browse your media library and send a photo to the frame)*
 - **Buttons**: `Refresh Display` · `Restart` · `Sleep`
-- **Sensors**: `Battery` · `Battery Voltage` · `WiFi Signal` · `IP Address` · `Next Scheduled Refresh` · `Last Seen`
+- **Sensors**: `Battery` · `Battery Voltage` · `WiFi Signal` · `IP Address` · `Next Scheduled Refresh` · `Last Seen` · `Send Status`
 - **Binary sensors**: `Charging` · `Charging Cable Connected` · `Reachable` · `Render Problem`
 - **Service**: `fraimic.send_image`
 

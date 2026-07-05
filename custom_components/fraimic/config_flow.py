@@ -31,7 +31,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_SCHEMA = vol.Schema({vol.Required(CONF_HOST, default="http://192.168.1.XX"): str})
+STEP_USER_SCHEMA = vol.Schema({vol.Required(CONF_HOST, default="http://fraimic.local"): str})
 
 
 async def _validate_host(hass: HomeAssistant, host: str) -> dict[str, Any]:
