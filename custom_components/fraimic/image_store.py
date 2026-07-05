@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -25,7 +26,7 @@ class FraimicImageStore:
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self.content: bytes | None = None
         self.updated_at: datetime | None = None
-        self._store: Store[dict] = Store(hass, STORAGE_VERSION, f"fraimic_image_{entry_id}")
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"fraimic_image_{entry_id}")
 
     async def async_load(self) -> None:
         """Restore the last-sent preview from disk, if any."""

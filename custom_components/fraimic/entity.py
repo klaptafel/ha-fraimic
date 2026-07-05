@@ -7,10 +7,11 @@ platform module only has to describe what's different about its entities.
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .coordinator import FraimicBaseCoordinator
 from .runtime_data import device_key
 
 
@@ -27,7 +28,7 @@ def device_info(entry: ConfigEntry, base_url: str) -> DeviceInfo:
     )
 
 
-class FraimicEntity(CoordinatorEntity):
+class FraimicEntity(CoordinatorEntity[FraimicBaseCoordinator]):
     """Common base for entities backed by one of the Fraimic coordinators.
 
     Set `_fraimic_always_available = True` on a subclass to opt out of the
@@ -41,7 +42,7 @@ class FraimicEntity(CoordinatorEntity):
     _attr_has_entity_name = True
     _fraimic_always_available = False
 
-    def __init__(self, coordinator, entry: ConfigEntry, key: str) -> None:
+    def __init__(self, coordinator: FraimicBaseCoordinator, entry: ConfigEntry, key: str) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = entity_unique_id(entry, key)

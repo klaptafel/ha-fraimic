@@ -93,7 +93,7 @@ def _fit_image(img: Image.Image, fit: str, device_orientation: str) -> Image.Ima
         else:
             new_width = visual_w
             new_height = round(new_width / src_ratio)
-        img = img.resize((new_width, new_height), Image.LANCZOS)
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
         left = (new_width - visual_w) // 2
         top = (new_height - visual_h) // 2
         result = img.crop((left, top, left + visual_w, top + visual_h))
@@ -106,7 +106,7 @@ def _fit_image(img: Image.Image, fit: str, device_orientation: str) -> Image.Ima
         else:
             new_height = visual_h
             new_width = round(new_height * src_ratio)
-        resized = img.resize((new_width, new_height), Image.LANCZOS)
+        resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
         canvas = Image.new("RGB", (visual_w, visual_h), (0, 0, 0))
         canvas.paste(resized, ((visual_w - new_width) // 2, (visual_h - new_height) // 2))
         result = canvas
@@ -129,7 +129,7 @@ def _fit_image(img: Image.Image, fit: str, device_orientation: str) -> Image.Ima
 
 def _build_palette_image() -> Image.Image:
     pal_img = Image.new("P", (1, 1))
-    flat = []
+    flat: list[int] = []
     for rgb in _PALETTE_RGB:
         flat.extend(rgb)
     flat.extend([0, 0, 0] * (256 - len(_PALETTE_RGB)))
@@ -197,8 +197,10 @@ def _pack_bin(indices: bytes | bytearray) -> bytes:
 
 def _indices_to_preview_png(indices: bytes | bytearray) -> bytes:
     pal_img = _build_palette_image()
+    palette = pal_img.getpalette()
+    assert palette is not None  # set by _build_palette_image's own putpalette() call
     out = Image.frombytes("P", (PANEL_WIDTH, PANEL_HEIGHT), bytes(indices))
-    out.putpalette(pal_img.getpalette())
+    out.putpalette(palette)
     buf = io.BytesIO()
     out.save(buf, format="PNG")
     return buf.getvalue()
@@ -234,7 +236,7 @@ def convert_image(
 
     Runs synchronously/CPU-bound -- call via hass.async_add_executor_job.
     """
-    img = Image.open(io.BytesIO(raw_bytes))
+    img: Image.Image = Image.open(io.BytesIO(raw_bytes))
     pre_exif_size = img.size
     img = ImageOps.exif_transpose(img)
     if img.size != pre_exif_size:

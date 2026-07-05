@@ -1,6 +1,9 @@
 """Sensors for Fraimic E-Ink Canvas."""
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any, cast
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -17,6 +20,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
 from .coordinator import FraimicBatteryCoordinator, FraimicCoordinator
@@ -100,7 +104,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-def _parse_timestamp(value):
+def _parse_timestamp(value: Any) -> datetime | None:
     """Parse an ISO datetime string (e.g. '2026-07-04T07:00:00') from the
     frame into a timezone-aware datetime, as required by
     SensorDeviceClass.TIMESTAMP.
@@ -130,7 +134,7 @@ class FraimicBatterySensor(FraimicEntity, SensorEntity):
         self.entity_description = description
 
     @property
-    def native_value(self):
+    def native_value(self) -> StateType:
         return (self.coordinator.data or {}).get(self.entity_description.key)
 
 
@@ -149,8 +153,8 @@ class FraimicInfoSensor(FraimicEntity, SensorEntity):
         self._path = path
 
     @property
-    def native_value(self):
-        value = self.coordinator.data or {}
+    def native_value(self) -> StateType | datetime:
+        value: Any = self.coordinator.data or {}
         for key in self._path:
             if not isinstance(value, dict):
                 return None
@@ -158,10 +162,14 @@ class FraimicInfoSensor(FraimicEntity, SensorEntity):
 
         if self.entity_description.device_class == SensorDeviceClass.TIMESTAMP:
             return _parse_timestamp(value)
-        return value
+        # value's shape is only known at runtime (raw JSON from the
+        # frame's /api/info) -- the SensorEntityDescription paths this
+        # class is constructed with are what actually guarantee it's a
+        # plain scalar, not something mypy can see from here.
+        return cast("StateType", value)
 
     @property
-    def extra_state_attributes(self) -> dict | None:
+    def extra_state_attributes(self) -> dict[str, Any] | None:
         data = self.coordinator.data or {}
         key = self.entity_description.key
 
@@ -202,7 +210,7 @@ class FraimicLastSeenSensor(FraimicEntity, SensorEntity):
         super().__init__(coordinator, entry, "last_seen")
 
     @property
-    def native_value(self):
+    def native_value(self) -> datetime | None:
         return self.coordinator.last_success
 
 

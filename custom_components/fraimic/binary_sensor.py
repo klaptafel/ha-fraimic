@@ -7,6 +7,8 @@ literally the string "True" or "False".
 """
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -118,10 +120,10 @@ class FraimicRenderProblemBinarySensor(FraimicEntity, BinarySensorEntity):
         failures = display.get("render_failures")
         if failures is None:
             return None
-        return failures > 0
+        return bool(failures > 0)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         display = (self.coordinator.data or {}).get("display") or {}
         return {
             "render_attempts": display.get("render_attempts"),

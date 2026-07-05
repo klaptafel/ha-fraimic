@@ -17,9 +17,10 @@ it was asleep".
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Any
 
-from aiohttp import ClientError
+from aiohttp import ClientError, ClientSession
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -33,8 +34,10 @@ from .const import DEFAULT_BATTERY_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN,
 _LOGGER = logging.getLogger(__name__)
 
 
-class _BaseFraimicCoordinator(DataUpdateCoordinator[dict]):
-    def __init__(self, hass: HomeAssistant, host: str, name: str, interval) -> None:
+class FraimicBaseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    def __init__(
+        self, hass: HomeAssistant, host: str, name: str, interval: timedelta
+    ) -> None:
         super().__init__(hass, _LOGGER, name=name, update_interval=interval)
         self.host = host.rstrip("/")
         self._last_success: datetime | None = None
@@ -62,10 +65,10 @@ class _BaseFraimicCoordinator(DataUpdateCoordinator[dict]):
     def _mark_success(self) -> None:
         self._last_success = dt_util.utcnow()
 
-    async def _fetch(self, session) -> dict:
+    async def _fetch(self, session: ClientSession) -> dict[str, Any]:
         raise NotImplementedError
 
-    async def _async_update_data(self) -> dict:
+    async def _async_update_data(self) -> dict[str, Any]:
         session = async_get_clientsession(self.hass)
         try:
             data = await self._fetch(session)
@@ -79,21 +82,21 @@ class _BaseFraimicCoordinator(DataUpdateCoordinator[dict]):
         return data
 
 
-class FraimicCoordinator(_BaseFraimicCoordinator):
+class FraimicCoordinator(FraimicBaseCoordinator):
     """Polls /api/info."""
 
     def __init__(self, hass: HomeAssistant, host: str) -> None:
         super().__init__(hass, host, f"{DOMAIN}_info", DEFAULT_SCAN_INTERVAL)
 
-    async def _fetch(self, session) -> dict:
+    async def _fetch(self, session: ClientSession) -> dict[str, Any]:
         return await api.get_info(session, self.base_url)
 
 
-class FraimicBatteryCoordinator(_BaseFraimicCoordinator):
+class FraimicBatteryCoordinator(FraimicBaseCoordinator):
     """Polls the lightweight /api/battery endpoint more frequently."""
 
     def __init__(self, hass: HomeAssistant, host: str) -> None:
         super().__init__(hass, host, f"{DOMAIN}_battery", DEFAULT_BATTERY_SCAN_INTERVAL)
 
-    async def _fetch(self, session) -> dict:
+    async def _fetch(self, session: ClientSession) -> dict[str, Any]:
         return await api.get_battery(session, self.base_url)

@@ -12,7 +12,7 @@ from custom_components.fraimic.const import UNAVAILABLE_AFTER
 from custom_components.fraimic.coordinator import (
     FraimicBatteryCoordinator,
     FraimicCoordinator,
-    _BaseFraimicCoordinator,
+    FraimicBaseCoordinator,
 )
 
 HOST = "http://1.2.3.4"
@@ -67,7 +67,7 @@ async def test_known_api_error_propagates_as_update_failed(
 
 
 async def test_base_fetch_hook_is_abstract(hass: HomeAssistant) -> None:
-    coordinator = _BaseFraimicCoordinator(hass, HOST, "test", timedelta(minutes=1))
+    coordinator = FraimicBaseCoordinator(hass, HOST, "test", timedelta(minutes=1))
     with pytest.raises(NotImplementedError):
         await coordinator._fetch(session=None)
 

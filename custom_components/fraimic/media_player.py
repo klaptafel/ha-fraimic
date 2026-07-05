@@ -17,16 +17,17 @@ import logging
 import os
 import urllib.parse
 from datetime import timedelta
+from typing import Any
 
 import async_timeout
 import voluptuous as vol
 from aiohttp import ClientError
 
 from homeassistant.components import media_source
-from homeassistant.components.media_player import (
-    BrowseMedia,
+from homeassistant.components.media_player import MediaPlayerEntity
+from homeassistant.components.media_player.browse_media import BrowseMedia
+from homeassistant.components.media_player.const import (
     MediaClass,
-    MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
     MediaType,
@@ -75,7 +76,12 @@ _LOGGER = logging.getLogger(__name__)
 # busy-lock check exists to prevent (see the comment in _convert_and_send).
 PARALLEL_UPDATES = 0
 
-SEND_IMAGE_SCHEMA = {
+# Deliberately a plain dict, not vol.Schema(...) -- async_register_entity_service
+# inspects the schema's actual shape at runtime and rejects anything that
+# isn't a raw field dict as "a non entity service schema" (it merges in the
+# standard entity-service fields itself). The dict-vs-Any typing mismatch
+# this causes is a stub limitation, not a real type error.
+SEND_IMAGE_SCHEMA: dict[str | vol.Marker, Any] = {
     vol.Required(ATTR_PATH): cv.string,
     vol.Optional(ATTR_FIT, default=DEFAULT_FIT): vol.In(FIT_MODES),
     vol.Optional(ATTR_DITHER, default=DEFAULT_DITHER): vol.In(DITHER_MODES),
@@ -168,7 +174,7 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
             ),
         )
 
-    async def async_play_media(self, media_type: str, media_id: str, **kwargs) -> None:
+    async def async_play_media(self, media_type: str, media_id: str, **kwargs: Any) -> None:
         """Called when the user taps an image in the media browser.
 
         Uses the fit/dither set in the integration's Options (Configure),

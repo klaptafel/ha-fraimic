@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 import async_timeout
 from aiohttp import ClientError, ClientSession
@@ -49,8 +50,12 @@ _UPLOAD_RETRY_DELAYS = (2, 5)  # seconds to wait before attempt 2 and 3
 
 
 async def _request_json(
-    session: ClientSession, method: str, url: str, request_timeout: int = DEFAULT_TIMEOUT, **kwargs
-) -> dict:
+    session: ClientSession,
+    method: str,
+    url: str,
+    request_timeout: int = DEFAULT_TIMEOUT,
+    **kwargs: Any,
+) -> dict[str, Any]:
     async with async_timeout.timeout(request_timeout):
         async with session.request(method, url, **kwargs) as resp:
             try:
@@ -80,11 +85,11 @@ async def _request_json(
             return payload
 
 
-async def get_info(session: ClientSession, host: str) -> dict:
+async def get_info(session: ClientSession, host: str) -> dict[str, Any]:
     return await _request_json(session, "GET", f"{host}{EP_INFO}")
 
 
-async def get_battery(session: ClientSession, host: str) -> dict:
+async def get_battery(session: ClientSession, host: str) -> dict[str, Any]:
     return await _request_json(session, "GET", f"{host}{EP_BATTERY}")
 
 
@@ -100,7 +105,7 @@ async def refresh(session: ClientSession, host: str) -> None:
     await _request_json(session, "POST", f"{host}{EP_REFRESH}")
 
 
-async def upload_image(session: ClientSession, host: str, bin_data: bytes) -> dict:
+async def upload_image(session: ClientSession, host: str, bin_data: bytes) -> dict[str, Any]:
     """POST the converted image to the frame.
 
     Retries on connection-level failures (ClientError/TimeoutError) --
@@ -130,4 +135,8 @@ async def upload_image(session: ClientSession, host: str, bin_data: bytes) -> di
                 "retrying" if attempt + 1 < _UPLOAD_MAX_ATTEMPTS else "giving up",
                 err,
             )
+    # Unreachable unless _UPLOAD_MAX_ATTEMPTS is changed to 0 -- asserted
+    # (rather than left implicit) so that change fails loudly instead of
+    # raising a confusing "exceptions must derive from BaseException".
+    assert last_error is not None
     raise last_error
