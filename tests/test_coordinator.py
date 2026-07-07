@@ -10,6 +10,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.fraimic.const import UNAVAILABLE_AFTER
 from custom_components.fraimic.coordinator import (
+    FraimicAlbumsCoordinator,
     FraimicBatteryCoordinator,
     FraimicCoordinator,
     FraimicBaseCoordinator,
@@ -99,3 +100,51 @@ async def test_device_reachable_false_after_unavailable_after_window(
 
     coordinator._last_success = dt_util.utcnow() - (UNAVAILABLE_AFTER + timedelta(minutes=1))
     assert coordinator.device_reachable is False
+
+
+async def test_albums_coordinator_success(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{HOST}/api/info", json={"device": {"device_key": "abc"}})
+    aioclient_mock.get(f"{HOST}/api/albums", json={"albums": []})
+    main = FraimicCoordinator(hass, HOST)
+    await main.async_refresh()
+
+    albums = FraimicAlbumsCoordinator(hass, HOST, main)
+    await albums.async_refresh()
+
+    assert albums.last_update_success is True
+    assert albums.data == {"albums": []}
+
+
+async def test_albums_coordinator_skips_fetch_when_main_unreachable(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """No /api/albums route registered on purpose -- if the reachability
+    gate failed and a real request fired, the unmocked URL itself would
+    error, which is a stronger assertion than just checking a status flag."""
+    main = FraimicCoordinator(hass, HOST)  # never refreshed -- device_reachable is False
+    albums = FraimicAlbumsCoordinator(hass, HOST, main)
+
+    await albums.async_refresh()
+
+    assert albums.last_update_success is False
+    assert len(aioclient_mock.mock_calls) == 0
+
+
+async def test_albums_coordinator_gate_reopens_once_main_reachable(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """Mirrors the startup-ordering fix in __init__.py: the main
+    coordinator's own first refresh must complete before the albums
+    coordinator's gate can ever pass -- constructing/refreshing both
+    before the main coordinator succeeds must not permanently wedge it."""
+    aioclient_mock.get(f"{HOST}/api/info", json={"device": {"device_key": "abc"}})
+    aioclient_mock.get(f"{HOST}/api/albums", json={"albums": []})
+    main = FraimicCoordinator(hass, HOST)
+    albums = FraimicAlbumsCoordinator(hass, HOST, main)
+
+    await albums.async_refresh()
+    assert albums.last_update_success is False
+
+    await main.async_refresh()
+    await albums.async_refresh()
+    assert albums.last_update_success is True

@@ -14,6 +14,12 @@ INFO = {
     "device": {"device_key": "abc123"},
     "wifi": {"rssi": -55, "ip": "1.2.3.4"},
     "display": {"next_refresh": "2026-07-04T07:00:00", "render_attempts": 10, "render_failures": 2},
+    "settings": {
+        "voice_recording": False,
+        "keep_awake": True,
+        "auto_update": False,
+        "charging_led": False,
+    },
 }
 BATTERY = {"percent": 66, "voltage_mv": 4100, "charging": True, "cable_connected": True}
 
@@ -107,6 +113,107 @@ async def test_binary_sensors(hass: HomeAssistant, aioclient_mock) -> None:
     assert render_problem_state.state == "on"
     assert render_problem_state.attributes["render_attempts"] == 10
     assert render_problem_state.attributes["render_failures"] == 2
+
+
+async def test_settings_binary_sensors(hass: HomeAssistant, aioclient_mock) -> None:
+    """settings.* comes from the already-fetched /api/info poll -- no new
+    network call -- so these should just reflect whatever's in that
+    payload, same as the other info-derived entities."""
+    await _setup(hass, aioclient_mock)
+
+    voice_state = hass.states.get(_entity_id(hass, "binary_sensor", "voice_recording"))
+    assert voice_state.state == "off"
+
+    keep_awake_state = hass.states.get(_entity_id(hass, "binary_sensor", "keep_awake"))
+    assert keep_awake_state.state == "on"
+
+    auto_update_state = hass.states.get(_entity_id(hass, "binary_sensor", "auto_update"))
+    assert auto_update_state.state == "off"
+
+    charging_led_state = hass.states.get(_entity_id(hass, "binary_sensor", "charging_led"))
+    assert charging_led_state.state == "off"
+
+
+async def test_albums_sensor_reflects_data_and_excludes_image_urls(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    aioclient_mock.get(
+        f"{HOST}/api/albums",
+        json={
+            "albums": [
+                {
+                    "id": "album-1",
+                    "name": "Vacation",
+                    "active": True,
+                    "playback_mode": "random",
+                    "image_count": 3,
+                    "schedule": {"type": "interval", "interval_value": 24, "interval_unit": "hours"},
+                    "images": [
+                        {"upload_id": "x", "url": "https://example.com/secret", "created_at": "now"}
+                    ],
+                },
+                {
+                    "id": "album-2",
+                    "name": "Weekdays",
+                    "active": False,
+                    "playback_mode": "sequential",
+                    "image_count": 0,
+                    "schedule": {"type": "specific_days", "days": ["monday", "wednesday"]},
+                    "images": [],
+                },
+            ]
+        },
+    )
+    await _setup(hass, aioclient_mock)
+
+    state = hass.states.get(_entity_id(hass, "sensor", "albums"))
+    assert state.state == "2"
+    albums = state.attributes["albums"]
+    assert albums == [
+        {
+            "id": "album-1",
+            "name": "Vacation",
+            "active": True,
+            "playback_mode": "random",
+            "image_count": 3,
+            "schedule": "every 24 hours",
+        },
+        {
+            "id": "album-2",
+            "name": "Weekdays",
+            "active": False,
+            "playback_mode": "sequential",
+            "image_count": 0,
+            "schedule": "monday, wednesday",
+        },
+    ]
+    # Pre-signed S3 URLs expire in ~1h and are functionally bearer
+    # credentials embedded in a URL -- must never end up in HA state/history.
+    assert "images" not in albums[0]
+    assert "images" not in albums[1]
+
+
+def test_flatten_schedule_falls_back_for_unrecognized_type() -> None:
+    """Defensive against a future cloud-side schedule type this
+    integration doesn't know about yet -- must not crash, just say so."""
+    from custom_components.fraimic.sensor import _flatten_schedule
+
+    assert _flatten_schedule({"type": "something_new"}) == "unknown schedule"
+
+
+async def test_albums_sensor_unavailable_when_albums_never_fetched(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """No /api/albums mocked by the shared _setup() helper, so the cloud-
+    proxied fetch fails -- correctly "unavailable" (we genuinely don't
+    know), not a misleading "0" that could be read as "confirmed zero
+    albums". Standard tolerant availability, tied to the albums
+    coordinator's own reachability, same model as every other
+    coordinator-backed entity here -- not a special case."""
+    await _setup(hass, aioclient_mock)
+
+    state = hass.states.get(_entity_id(hass, "sensor", "albums"))
+    assert state.state == "unavailable"
 
 
 async def test_send_status_sensor_registration_and_default_value(

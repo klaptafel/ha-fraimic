@@ -33,13 +33,18 @@
       "wifi_ip": { "name": "IP Address" },
       "next_refresh": { "name": "Next Scheduled Refresh" },
       "last_seen": { "name": "Last Seen" },
-      "send_status": { "name": "Send Status" }
+      "send_status": { "name": "Send Status" },
+      "albums": { "name": "Albums" }
     },
     "binary_sensor": {
       "charging": { "name": "Charging" },
       "cable_connected": { "name": "Charging Cable Connected" },
       "reachable": { "name": "Reachable" },
-      "render_problem": { "name": "Render Problem" }
+      "render_problem": { "name": "Render Problem" },
+      "voice_recording": { "name": "Voice Recording" },
+      "keep_awake": { "name": "Keep Awake" },
+      "auto_update": { "name": "Auto Update" },
+      "charging_led": { "name": "Charging LED" }
     },
     "button": {
       "restart": { "name": "Restart" },

@@ -29,7 +29,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from . import api
-from .const import DEFAULT_BATTERY_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN, UNAVAILABLE_AFTER
+from .const import (
+    DEFAULT_ALBUMS_SCAN_INTERVAL,
+    DEFAULT_BATTERY_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    UNAVAILABLE_AFTER,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,3 +106,26 @@ class FraimicBatteryCoordinator(FraimicBaseCoordinator):
 
     async def _fetch(self, session: ClientSession) -> dict[str, Any]:
         return await api.get_battery(session, self.base_url)
+
+
+class FraimicAlbumsCoordinator(FraimicBaseCoordinator):
+    """Polls the cloud-proxied /api/albums endpoint -- see api.get_albums.
+
+    Gated on the main coordinator's device_reachable so this doesn't
+    attempt (and time out on) a call already known to fail while the frame
+    itself is asleep/unreachable -- that gate is purely an efficiency/
+    politeness measure toward an unofficial, cloud-proxied endpoint, not a
+    correctness requirement (a real attempt would fail the same way).
+    """
+
+    def __init__(self, hass: HomeAssistant, host: str, main_coordinator: FraimicCoordinator) -> None:
+        super().__init__(hass, host, f"{DOMAIN}_albums", DEFAULT_ALBUMS_SCAN_INTERVAL)
+        self._main_coordinator = main_coordinator
+
+    async def _fetch(self, session: ClientSession) -> dict[str, Any]:
+        if not self._main_coordinator.device_reachable:
+            # Same translation path (-> UpdateFailed) as every other
+            # _fetch failure, via _async_update_data's except clause --
+            # not raising UpdateFailed directly here, for consistency.
+            raise HomeAssistantError("Frame not reachable -- skipping albums fetch")
+        return await api.get_albums(session, self.base_url)

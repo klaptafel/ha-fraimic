@@ -9,7 +9,7 @@ from homeassistant.const import Platform
 from homeassistant.helpers import device_registry as dr
 
 from .const import CONF_HOST, DOMAIN
-from .coordinator import FraimicBatteryCoordinator, FraimicCoordinator
+from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
 from .image_store import FraimicImageStore
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, device_key
 
@@ -41,9 +41,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
         image_store.async_load(),
     )
 
+    # Constructed (and refreshed) only after the main coordinator's own
+    # first refresh completes -- its device_reachable gate would otherwise
+    # read a still-in-flight main coordinator's default False, silently
+    # skipping the real fetch on every fresh restart regardless of actual
+    # reachability. Plain async_refresh(), not async_config_entry_first_
+    # refresh() -- this is optional and cloud-dependent, a hiccup here must
+    # not raise ConfigEntryNotReady and take the whole entry down with it.
+    albums_coordinator = FraimicAlbumsCoordinator(hass, host, coordinator)
+    await albums_coordinator.async_refresh()
+
     entry.runtime_data = FraimicRuntimeData(
         coordinator=coordinator,
         battery_coordinator=battery_coordinator,
+        albums_coordinator=albums_coordinator,
         image_store=image_store,
     )
 

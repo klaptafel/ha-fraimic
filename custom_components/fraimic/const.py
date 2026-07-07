@@ -15,8 +15,13 @@ EP_RESTART = "/api/restart"
 EP_SLEEP = "/api/sleep"
 EP_REFRESH = "/api/refresh"
 EP_IMAGE = "/api/image"
+# Not in the official API guide -- see api.get_albums for why.
+EP_ALBUMS = "/api/albums"
 
 DEFAULT_BATTERY_SCAN_INTERVAL = timedelta(seconds=60)
+# Cloud-proxied and not time-sensitive -- much slower than the main poll,
+# and gated on device_reachable besides (see FraimicAlbumsCoordinator).
+DEFAULT_ALBUMS_SCAN_INTERVAL = timedelta(minutes=30)
 
 # Spectra 6 panel geometry (EL133UF1 controller)
 PANEL_WIDTH = 1200

@@ -7,7 +7,7 @@ from datetime import datetime
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN
-from .coordinator import FraimicBatteryCoordinator, FraimicCoordinator
+from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
 from .image_store import FraimicImageStore
 
 
@@ -79,6 +79,7 @@ class FraimicSendStatus:
 class FraimicRuntimeData:
     coordinator: FraimicCoordinator
     battery_coordinator: FraimicBatteryCoordinator
+    albums_coordinator: FraimicAlbumsCoordinator
     image_store: FraimicImageStore
     send_status: FraimicSendStatus = field(default_factory=FraimicSendStatus)
 

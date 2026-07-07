@@ -25,6 +25,12 @@ async def test_get_battery_success(hass: HomeAssistant, aioclient_mock) -> None:
     assert result == {"percent": 88}
 
 
+async def test_get_albums_success(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{HOST}/api/albums", json={"albums": []})
+    result = await api.get_albums(async_get_clientsession(hass), HOST)
+    assert result == {"albums": []}
+
+
 async def test_known_error_code_raises_translation_key(hass: HomeAssistant, aioclient_mock) -> None:
     aioclient_mock.post(f"{HOST}/api/sleep", json={"error": "charging_cable_connected"})
     with pytest.raises(HomeAssistantError) as exc_info:

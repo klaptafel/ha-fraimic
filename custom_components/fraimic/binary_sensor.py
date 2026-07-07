@@ -7,7 +7,7 @@ literally the string "True" or "False".
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -42,6 +42,38 @@ BATTERY_BINARY_SENSORS: tuple[BinarySensorEntityDescription, ...] = (
     ),
 )
 
+# settings.* isn't documented in the official API guide, but it's already
+# part of every /api/info poll this integration fetches -- no new network
+# call or dependency to surface these. None of BinarySensorDeviceClass fits
+# any of the four (no "keep awake"/"voice recording" class exists), so
+# device_class is deliberately left unset, same as wifi_ip's sensor.
+INFO_BINARY_SENSOR_DESCRIPTIONS: tuple[tuple[BinarySensorEntityDescription, tuple[str, ...]], ...] = (
+    (
+        BinarySensorEntityDescription(
+            key="voice_recording", translation_key="voice_recording", entity_category=EntityCategory.DIAGNOSTIC
+        ),
+        ("settings", "voice_recording"),
+    ),
+    (
+        BinarySensorEntityDescription(
+            key="keep_awake", translation_key="keep_awake", entity_category=EntityCategory.DIAGNOSTIC
+        ),
+        ("settings", "keep_awake"),
+    ),
+    (
+        BinarySensorEntityDescription(
+            key="auto_update", translation_key="auto_update", entity_category=EntityCategory.DIAGNOSTIC
+        ),
+        ("settings", "auto_update"),
+    ),
+    (
+        BinarySensorEntityDescription(
+            key="charging_led", translation_key="charging_led", entity_category=EntityCategory.DIAGNOSTIC
+        ),
+        ("settings", "charging_led"),
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: FraimicConfigEntry, async_add_entities: AddEntitiesCallback
@@ -50,6 +82,10 @@ async def async_setup_entry(
     entities: list[BinarySensorEntity] = [
         FraimicBatteryBinarySensor(runtime.battery_coordinator, entry, description)
         for description in BATTERY_BINARY_SENSORS
+    ]
+    entities += [
+        FraimicInfoBinarySensor(runtime.coordinator, entry, description, path)
+        for description, path in INFO_BINARY_SENSOR_DESCRIPTIONS
     ]
     entities.append(FraimicReachableBinarySensor(runtime.coordinator, entry))
     entities.append(FraimicRenderProblemBinarySensor(runtime.coordinator, entry))
@@ -71,6 +107,33 @@ class FraimicBatteryBinarySensor(FraimicEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         return (self.coordinator.data or {}).get(self.entity_description.key)
+
+
+class FraimicInfoBinarySensor(FraimicEntity, BinarySensorEntity):
+    """A (possibly nested) boolean value from /api/info."""
+
+    def __init__(
+        self,
+        coordinator: FraimicCoordinator,
+        entry: ConfigEntry,
+        description: BinarySensorEntityDescription,
+        path: tuple[str, ...],
+    ) -> None:
+        super().__init__(coordinator, entry, description.key)
+        self.entity_description = description
+        self._path = path
+
+    @property
+    def is_on(self) -> bool | None:
+        value: Any = self.coordinator.data or {}
+        for key in self._path:
+            if not isinstance(value, dict):
+                return None
+            value = value.get(key)
+        # value's shape is only known at runtime (raw JSON from /api/info) --
+        # the path this class is constructed with is what actually guarantees
+        # it's a bool, not something mypy can see from here.
+        return cast("bool | None", value)
 
 
 class FraimicReachableBinarySensor(FraimicEntity, BinarySensorEntity):

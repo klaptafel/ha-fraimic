@@ -3,7 +3,14 @@
     "sensor": {
       "wifi_ip": { "default": "mdi:ip-network" },
       "voltage_mv": { "default": "mdi:current-dc" },
-      "send_status": { "default": "mdi:information-outline" }
+      "send_status": { "default": "mdi:information-outline" },
+      "albums": { "default": "mdi:folder-multiple-image" }
+    },
+    "binary_sensor": {
+      "voice_recording": { "default": "mdi:microphone" },
+      "keep_awake": { "default": "mdi:sleep-off" },
+      "auto_update": { "default": "mdi:update" },
+      "charging_led": { "default": "mdi:led-on" }
     },
     "button": {
       "sleep": { "default": "mdi:sleep" },

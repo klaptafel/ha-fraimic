@@ -58,6 +58,25 @@ async def test_setup_entry_fails_when_frame_unreachable(
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
 
+async def test_setup_entry_succeeds_when_albums_fetch_fails(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """Albums is optional and cloud-dependent (see coordinator.py) -- a
+    failure there must not take the media player/buttons/every other
+    entity down with it, unlike a genuine /api/info failure."""
+    aioclient_mock.get(f"{HOST}/api/info", json=INFO)
+    aioclient_mock.get(f"{HOST}/api/battery", json=BATTERY)
+    aioclient_mock.get(f"{HOST}/api/albums", exc=aiohttp.ClientError)
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.albums_coordinator.last_update_success is False
+
+
 async def test_unload_entry_clears_runtime_data(hass: HomeAssistant, aioclient_mock) -> None:
     aioclient_mock.get(f"{HOST}/api/info", json=INFO)
     aioclient_mock.get(f"{HOST}/api/battery", json=BATTERY)

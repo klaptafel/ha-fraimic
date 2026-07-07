@@ -23,7 +23,17 @@ from aiohttp import ClientError, ClientSession
 
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import DEFAULT_TIMEOUT, DOMAIN, EP_BATTERY, EP_IMAGE, EP_INFO, EP_REFRESH, EP_RESTART, EP_SLEEP
+from .const import (
+    DEFAULT_TIMEOUT,
+    DOMAIN,
+    EP_ALBUMS,
+    EP_BATTERY,
+    EP_IMAGE,
+    EP_INFO,
+    EP_REFRESH,
+    EP_RESTART,
+    EP_SLEEP,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +101,21 @@ async def get_info(session: ClientSession, host: str) -> dict[str, Any]:
 
 async def get_battery(session: ClientSession, host: str) -> dict[str, Any]:
     return await _request_json(session, "GET", f"{host}{EP_BATTERY}")
+
+
+async def get_albums(session: ClientSession, host: str) -> dict[str, Any]:
+    """GET /api/albums -- NOT in the official API guide, found via the
+    frame's own /logs debug output. That output confirmed the firmware
+    proxies this straight to Fraimic's cloud backend
+    (https://origin.fraimic.com), authenticated with device_key -- unlike
+    every other endpoint here, this only works if the frame itself has
+    real internet access, not just LAN reachability. Cloud-side write
+    errors (POST/PUT, not used here) come back as FastAPI's
+    {"detail": [...]} shape, not this integration's usual {"error": "code"}
+    -- _request_json's status-code check handles both generically since it
+    doesn't inspect body shape, but don't assume the {"error": ...} shape
+    if write support is ever added here."""
+    return await _request_json(session, "GET", f"{host}{EP_ALBUMS}")
 
 
 async def restart(session: ClientSession, host: str) -> None:

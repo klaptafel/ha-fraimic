@@ -33,13 +33,18 @@
       "wifi_ip": { "name": "IP-adres" },
       "next_refresh": { "name": "Volgende geplande refresh" },
       "last_seen": { "name": "Laatst gezien" },
-      "send_status": { "name": "Verzendstatus" }
+      "send_status": { "name": "Verzendstatus" },
+      "albums": { "name": "Albums" }
     },
     "binary_sensor": {
       "charging": { "name": "Opladen" },
       "cable_connected": { "name": "Oplaadkabel aangesloten" },
       "reachable": { "name": "Bereikbaar" },
-      "render_problem": { "name": "Weergaveprobleem" }
+      "render_problem": { "name": "Weergaveprobleem" },
+      "voice_recording": { "name": "Spraakopname" },
+      "keep_awake": { "name": "Wakker houden" },
+      "auto_update": { "name": "Automatisch bijwerken" },
+      "charging_led": { "name": "Oplaad-LED" }
     },
     "button": {
       "restart": { "name": "Herstarten" },

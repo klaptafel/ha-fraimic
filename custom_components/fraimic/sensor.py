@@ -23,7 +23,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
-from .coordinator import FraimicBatteryCoordinator, FraimicCoordinator
+from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
 from .entity import FraimicEntity
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
 
@@ -101,6 +101,7 @@ async def async_setup_entry(
     ]
     entities.append(FraimicLastSeenSensor(runtime.coordinator, entry))
     entities.append(FraimicStatusSensor(runtime, entry))
+    entities.append(FraimicAlbumsSensor(runtime.albums_coordinator, entry))
     async_add_entities(entities)
 
 
@@ -122,6 +123,19 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
     return dt_util.as_utc(parsed)
+
+
+def _flatten_schedule(schedule: dict[str, Any]) -> str:
+    """Render an album's schedule as short, readable text (e.g. "every 24
+    hours" / "monday, wednesday") instead of exposing the raw nested dict
+    as an entity attribute."""
+    schedule_type = schedule.get("type")
+    if schedule_type == "interval":
+        return f"every {schedule.get('interval_value')} {schedule.get('interval_unit')}"
+    if schedule_type == "specific_days":
+        days = schedule.get("days") or []
+        return ", ".join(days)
+    return "unknown schedule"
 
 
 class FraimicBatterySensor(FraimicEntity, SensorEntity):
@@ -238,3 +252,41 @@ class FraimicStatusSensor(FraimicEntity, SensorEntity):
     @property
     def native_value(self) -> str | None:
         return self._runtime.status_text
+
+
+class FraimicAlbumsSensor(FraimicEntity, SensorEntity):
+    """Read-only listing of albums from the undocumented, cloud-proxied
+    /api/albums endpoint -- see coordinator.FraimicAlbumsCoordinator and
+    api.get_albums for why this only updates while the frame has real
+    internet access, unlike every other entity in this integration.
+
+    Deliberately excludes each image's presigned S3 URL from attributes --
+    those expire in about an hour and are functionally bearer credentials
+    embedded in a URL, neither of which belongs in HA's state history.
+    """
+
+    _attr_translation_key = "albums"
+
+    def __init__(self, coordinator: FraimicAlbumsCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "albums")
+
+    @property
+    def native_value(self) -> int:
+        return len((self.coordinator.data or {}).get("albums", []))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        albums = (self.coordinator.data or {}).get("albums", [])
+        return {
+            "albums": [
+                {
+                    "id": album.get("id"),
+                    "name": album.get("name"),
+                    "active": album.get("active"),
+                    "playback_mode": album.get("playback_mode"),
+                    "image_count": album.get("image_count"),
+                    "schedule": _flatten_schedule(album.get("schedule") or {}),
+                }
+                for album in albums
+            ]
+        }
