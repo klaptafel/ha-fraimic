@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, cast
 
+import voluptuous as vol
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -12,17 +13,39 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    ATTR_ENTITY_ID,
     EntityCategory,
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     UnitOfElectricPotential,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
+from . import api
+from .const import (
+    ATTR_ACTIVE,
+    ATTR_ALBUM_ID,
+    ATTR_ALBUM_NAME,
+    ATTR_DAYS,
+    ATTR_DESCRIPTION,
+    ATTR_INTERVAL_UNIT,
+    ATTR_INTERVAL_VALUE,
+    ATTR_PLAYBACK_MODE,
+    ATTR_SCHEDULE_TYPE,
+    DOMAIN,
+    PLAYBACK_MODES,
+    SCHEDULE_DAYS,
+    SCHEDULE_INTERVAL_UNITS,
+    SCHEDULE_TYPES,
+    SERVICE_UPDATE_ALBUM,
+)
 from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
 from .entity import FraimicEntity
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
@@ -30,6 +53,29 @@ from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_si
 # All state comes from the coordinators' shared poll, not per-entity I/O,
 # so there's nothing for entities of this platform to serialize against.
 PARALLEL_UPDATES = 0
+
+# A plain domain service (not an entity service) -- deliberately, so a
+# call is never silently skipped by HA's own entity_service_call, which
+# drops the request with no error/log for any entity that's currently
+# unavailable (homeassistant/helpers/service.py). That's exactly the
+# failure mode this write action must not have: the albums sensor is
+# tolerant-availability (frame reachable over LAN but no internet, for
+# example), and silently doing nothing to a write the user explicitly
+# triggered would be far worse than for a read-only display.
+UPDATE_ALBUM_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Required(ATTR_ALBUM_ID): cv.string,
+        vol.Optional(ATTR_ALBUM_NAME): cv.string,
+        vol.Optional(ATTR_DESCRIPTION): cv.string,
+        vol.Optional(ATTR_ACTIVE): cv.boolean,
+        vol.Optional(ATTR_PLAYBACK_MODE): vol.In(PLAYBACK_MODES),
+        vol.Optional(ATTR_SCHEDULE_TYPE): vol.In(SCHEDULE_TYPES),
+        vol.Optional(ATTR_INTERVAL_VALUE): vol.Coerce(int),
+        vol.Optional(ATTR_INTERVAL_UNIT): vol.In(SCHEDULE_INTERVAL_UNITS),
+        vol.Optional(ATTR_DAYS): vol.All(cv.ensure_list, [vol.In(SCHEDULE_DAYS)]),
+    }
+)
 
 # Sensors backed by the fast-polling /api/battery endpoint (60s).
 # Boolean fields (charging, cable_connected) live in binary_sensor.py instead.
@@ -104,6 +150,15 @@ async def async_setup_entry(
     entities.append(FraimicAlbumsSensor(runtime.albums_coordinator, entry))
     async_add_entities(entities)
 
+    if not hass.services.has_service(DOMAIN, SERVICE_UPDATE_ALBUM):
+
+        async def _async_handle_update_album(call: ServiceCall) -> None:
+            await _async_update_album(hass, call)
+
+        hass.services.async_register(
+            DOMAIN, SERVICE_UPDATE_ALBUM, _async_handle_update_album, schema=UPDATE_ALBUM_SCHEMA
+        )
+
 
 def _parse_timestamp(value: Any) -> datetime | None:
     """Parse an ISO datetime string (e.g. '2026-07-04T07:00:00') from the
@@ -136,6 +191,93 @@ def _flatten_schedule(schedule: dict[str, Any]) -> str:
         days = schedule.get("days") or []
         return ", ".join(days)
     return "unknown schedule"
+
+
+def _build_schedule(
+    schedule_type: str,
+    interval_value: int | None,
+    interval_unit: str | None,
+    days: list[str] | None,
+) -> dict[str, Any]:
+    """Reassemble the update_album service's flat schedule_type/
+    interval_value/interval_unit/days fields into the nested shape the
+    cloud API expects -- symmetric with _flatten_schedule above.
+
+    Sent as-is, whichever fields the caller didn't pass stay None -- the
+    cloud API treats `schedule` as a full replacement, not a merge
+    (confirmed via curl: PUTting {"type": "specific_days", "days": [...]}
+    nulls out interval_value/interval_unit server-side), so this always
+    produces the complete shape for whichever type is being set rather
+    than a partial one that could be misread as "keep the old values".
+    """
+    return {
+        "type": schedule_type,
+        "interval_value": interval_value,
+        "interval_unit": interval_unit,
+        "days": days,
+    }
+
+
+async def _async_update_album(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Handler for fraimic.update_album -- resolves entity_id to the
+    owning config entry itself (rather than via HA's entity-service
+    helpers) so an unavailable or unknown entity raises a clear error
+    instead of silently doing nothing -- see UPDATE_ALBUM_SCHEMA's comment
+    for why that matters here specifically."""
+    entity_id = call.data[ATTR_ENTITY_ID]
+    entity_entry = er.async_get(hass).async_get(entity_id)
+    config_entry = (
+        hass.config_entries.async_get_entry(entity_entry.config_entry_id)
+        if entity_entry and entity_entry.config_entry_id
+        else None
+    )
+    # Checked beyond "is this registered at all" -- the services.yaml
+    # selector already scopes the picker to this integration's sensors,
+    # but doesn't stop someone choosing e.g. the Battery sensor by mistake.
+    # unique_id's "_albums" suffix (see entity_unique_id/FraimicAlbumsSensor)
+    # confirms it's specifically the entity this service is meant for.
+    if (
+        entity_entry is None
+        or config_entry is None
+        or config_entry.domain != DOMAIN
+        or not (entity_entry.unique_id or "").endswith("_albums")
+    ):
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="entity_not_found",
+            translation_placeholders={"entity_id": entity_id},
+        )
+    runtime: FraimicRuntimeData = config_entry.runtime_data
+
+    fields: dict[str, Any] = {
+        key: call.data[attr]
+        for attr, key in (
+            (ATTR_ALBUM_NAME, "name"),
+            (ATTR_DESCRIPTION, "description"),
+            (ATTR_ACTIVE, "active"),
+            (ATTR_PLAYBACK_MODE, "playback_mode"),
+        )
+        if attr in call.data
+    }
+    if ATTR_SCHEDULE_TYPE in call.data:
+        fields["schedule"] = _build_schedule(
+            call.data[ATTR_SCHEDULE_TYPE],
+            call.data.get(ATTR_INTERVAL_VALUE),
+            call.data.get(ATTR_INTERVAL_UNIT),
+            call.data.get(ATTR_DAYS),
+        )
+
+    session = async_get_clientsession(hass)
+    await api.update_album(session, runtime.base_url, call.data[ATTR_ALBUM_ID], **fields)
+    # Reflect the change immediately instead of waiting up to 30 minutes
+    # for the next scheduled poll. Note: async_request_refresh() never
+    # raises on failure (a failed fetch is only visible via
+    # last_update_success/last_exception) -- if FraimicAlbumsCoordinator's
+    # gate on the main coordinator's device_reachable happens to trip in
+    # this exact narrow window, this refresh silently no-ops and the
+    # sensor keeps showing pre-write data until the next poll. Not worth
+    # engineering around given how narrow that window is.
+    await runtime.albums_coordinator.async_request_refresh()
 
 
 class FraimicBatterySensor(FraimicEntity, SensorEntity):

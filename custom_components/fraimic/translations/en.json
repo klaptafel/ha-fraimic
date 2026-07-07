@@ -88,6 +88,12 @@
     },
     "already_busy": {
       "message": "Still processing the previous image, wait a moment and try again."
+    },
+    "cloud_validation_error": {
+      "message": "Fraimic's cloud rejected the request: {detail}"
+    },
+    "entity_not_found": {
+      "message": "{entity_id} is not a Fraimic albums sensor."
     }
   },
   "services": {
@@ -110,6 +116,52 @@
         "dry_run": {
           "name": "Dry run",
           "description": "Converts and previews the image without uploading it to the frame."
+        }
+      }
+    },
+    "update_album": {
+      "name": "Update album",
+      "description": "Updates an existing album (find its ID via the Albums sensor's attributes). Only the fields you set are changed -- everything else on the album is left alone. Requires the frame to have internet access, since albums live on app.fraimic.com, not the frame itself.",
+      "fields": {
+        "entity_id": {
+          "name": "Albums sensor",
+          "description": "The Fraimic Albums sensor entity."
+        },
+        "album_id": {
+          "name": "Album ID",
+          "description": "The album's id, from the Albums sensor's attributes."
+        },
+        "name": {
+          "name": "Name",
+          "description": "New name for the album."
+        },
+        "description": {
+          "name": "Description",
+          "description": "New description for the album."
+        },
+        "active": {
+          "name": "Slideshow Mode",
+          "description": "Automatically rotate images."
+        },
+        "playback_mode": {
+          "name": "Playback Mode",
+          "description": "Choose how images cycle through the album."
+        },
+        "schedule_type": {
+          "name": "Image Rotation Schedule",
+          "description": "How often should images change? Replaces the album's entire schedule -- always send the matching fields below for whichever type you choose."
+        },
+        "interval_value": {
+          "name": "Interval value",
+          "description": "Used with Image Rotation Schedule: Every X Time, e.g. 24."
+        },
+        "interval_unit": {
+          "name": "Interval unit",
+          "description": "Used with Image Rotation Schedule: Every X Time -- minutes, hours, or days."
+        },
+        "days": {
+          "name": "Select Days",
+          "description": "Used with Image Rotation Schedule: Specific Days -- a list of weekdays, e.g. monday, wednesday."
         }
       }
     }

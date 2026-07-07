@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import async_timeout
 from aiohttp import ClientError, ClientSession
@@ -58,12 +58,64 @@ _KNOWN_ERROR_KEYS = frozenset(
 _UPLOAD_MAX_ATTEMPTS = 3
 _UPLOAD_RETRY_DELAYS = (2, 5)  # seconds to wait before attempt 2 and 3
 
+ErrorParser = Callable[[dict[str, Any], int], "HomeAssistantError | None"]
+
+
+def _frame_error(payload: dict[str, Any], status: int) -> HomeAssistantError | None:
+    """The frame's own native error shape: {"error": "code"}."""
+    error_code = payload.get("error")
+    if error_code in _KNOWN_ERROR_KEYS:
+        return HomeAssistantError(translation_domain=DOMAIN, translation_key=error_code)
+    if error_code:
+        return HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="unknown_error",
+            translation_placeholders={"error_code": str(error_code)},
+        )
+    if status >= 400:
+        return HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="http_error",
+            translation_placeholders={"status": str(status)},
+        )
+    return None
+
+
+def _cloud_error(payload: dict[str, Any], status: int) -> HomeAssistantError | None:
+    """FastAPI's {"detail": ...} shape from /api/albums writes -- detail is
+    a list of Pydantic-style error dicts for a 422, or a plain string for a
+    400 business-rule failure (both confirmed via curl against the real
+    device). Different shapes under the same key, unlike _frame_error."""
+    if status < 400:
+        return None
+    detail = payload.get("detail")
+    if isinstance(detail, str):
+        message = detail
+    elif isinstance(detail, list):
+        parts = []
+        for item in detail:
+            loc = item.get("loc") or []
+            if loc and loc[0] == "body":
+                loc = loc[1:]
+            parts.append(f"{'.'.join(str(p) for p in loc)}: {item.get('msg')}")
+        message = "; ".join(parts) if parts else f"HTTP {status}"
+    else:
+        # Defensive: a raw gateway/proxy error that isn't FastAPI's shape at
+        # all (e.g. a 502/504 during a real outage) -- don't crash formatting it.
+        message = f"HTTP {status}"
+    return HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key="cloud_validation_error",
+        translation_placeholders={"detail": message},
+    )
+
 
 async def _request_json(
     session: ClientSession,
     method: str,
     url: str,
     request_timeout: int = DEFAULT_TIMEOUT,
+    error_parser: ErrorParser = _frame_error,
     **kwargs: Any,
 ) -> dict[str, Any]:
     async with async_timeout.timeout(request_timeout):
@@ -75,23 +127,9 @@ async def _request_json(
             if not isinstance(payload, dict):
                 payload = {}
 
-            error_code = payload.get("error")
-            if error_code in _KNOWN_ERROR_KEYS:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN, translation_key=error_code
-                )
-            if error_code:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="unknown_error",
-                    translation_placeholders={"error_code": str(error_code)},
-                )
-            if resp.status >= 400:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="http_error",
-                    translation_placeholders={"status": str(resp.status)},
-                )
+            err = error_parser(payload, resp.status)
+            if err is not None:
+                raise err
             return payload
 
 
@@ -109,13 +147,24 @@ async def get_albums(session: ClientSession, host: str) -> dict[str, Any]:
     proxies this straight to Fraimic's cloud backend
     (https://origin.fraimic.com), authenticated with device_key -- unlike
     every other endpoint here, this only works if the frame itself has
-    real internet access, not just LAN reachability. Cloud-side write
-    errors (POST/PUT, not used here) come back as FastAPI's
-    {"detail": [...]} shape, not this integration's usual {"error": "code"}
-    -- _request_json's status-code check handles both generically since it
-    doesn't inspect body shape, but don't assume the {"error": ...} shape
-    if write support is ever added here."""
+    real internet access, not just LAN reachability."""
     return await _request_json(session, "GET", f"{host}{EP_ALBUMS}")
+
+
+async def update_album(session: ClientSession, host: str, album_id: str, **fields: Any) -> dict[str, Any]:
+    """PUT /api/albums/{id} -- partial update; only pass fields you want
+    changed, everything else is preserved server-side. `schedule`, if
+    present, must be the FULL replacement shape for whichever type is
+    being set -- the cloud does NOT merge it (confirmed via curl: sending
+    {"type": "specific_days", "days": [...]} nulls out interval_value/
+    interval_unit server-side)."""
+    return await _request_json(
+        session,
+        "PUT",
+        f"{host}{EP_ALBUMS}/{album_id}",
+        json=fields,
+        error_parser=_cloud_error,
+    )
 
 
 async def restart(session: ClientSession, host: str) -> None:

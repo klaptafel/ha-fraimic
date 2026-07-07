@@ -91,3 +91,23 @@ CONF_DEFAULT_DITHER = "default_dither"
 # this if your usage pattern differs (e.g. lower it if your frame wakes
 # more often, or raise it if it goes days between scheduled refreshes).
 UNAVAILABLE_AFTER = timedelta(hours=72)
+
+# Service for updating an existing album (found via sensor.albums' own `id`
+# attribute) -- not full CRUD, just the fields worth flipping from HA.
+# Confirmed via curl against the real device: album creation/deletion and
+# device-assignment stay on app.fraimic.com.
+SERVICE_UPDATE_ALBUM = "update_album"
+ATTR_ALBUM_ID = "album_id"
+ATTR_ALBUM_NAME = "name"
+ATTR_DESCRIPTION = "description"
+ATTR_ACTIVE = "active"
+ATTR_PLAYBACK_MODE = "playback_mode"
+ATTR_SCHEDULE_TYPE = "schedule_type"
+ATTR_INTERVAL_VALUE = "interval_value"
+ATTR_INTERVAL_UNIT = "interval_unit"
+ATTR_DAYS = "days"
+
+PLAYBACK_MODES = ("sequential", "random")
+SCHEDULE_TYPES = ("interval", "specific_days")
+SCHEDULE_INTERVAL_UNITS = ("minutes", "hours", "days")
+SCHEDULE_DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")

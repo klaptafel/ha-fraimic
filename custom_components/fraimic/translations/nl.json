@@ -88,6 +88,12 @@
     },
     "already_busy": {
       "message": "Nog bezig met de vorige afbeelding, wacht heel even en probeer opnieuw."
+    },
+    "cloud_validation_error": {
+      "message": "Fraimic's cloud wees het verzoek af: {detail}"
+    },
+    "entity_not_found": {
+      "message": "{entity_id} is geen Fraimic albums-sensor."
     }
   },
   "services": {
@@ -110,6 +116,52 @@
         "dry_run": {
           "name": "Testrun (dry run)",
           "description": "Converteert en toont de afbeelding zonder deze naar het frame te uploaden."
+        }
+      }
+    },
+    "update_album": {
+      "name": "Album bijwerken",
+      "description": "Werkt een bestaand album bij (vind het ID via de attributen van de Albums-sensor). Alleen de velden die je invult worden gewijzigd -- de rest van het album blijft ongemoeid. Vereist dat het frame internettoegang heeft, want albums staan op app.fraimic.com, niet op het frame zelf.",
+      "fields": {
+        "entity_id": {
+          "name": "Albums-sensor",
+          "description": "De Fraimic Albums-sensor entity."
+        },
+        "album_id": {
+          "name": "Album-ID",
+          "description": "Het id van het album, uit de attributen van de Albums-sensor."
+        },
+        "name": {
+          "name": "Naam",
+          "description": "Nieuwe naam voor het album."
+        },
+        "description": {
+          "name": "Omschrijving",
+          "description": "Nieuwe omschrijving voor het album."
+        },
+        "active": {
+          "name": "Slideshow Mode",
+          "description": "Wisselt afbeeldingen automatisch af."
+        },
+        "playback_mode": {
+          "name": "Playback Mode",
+          "description": "Kies hoe afbeeldingen door het album heen wisselen."
+        },
+        "schedule_type": {
+          "name": "Image Rotation Schedule",
+          "description": "Hoe vaak moeten afbeeldingen wisselen? Vervangt het hele schema van het album -- stuur altijd de bijbehorende velden hieronder mee voor het gekozen type."
+        },
+        "interval_value": {
+          "name": "Interval-waarde",
+          "description": "Gebruikt bij Image Rotation Schedule: Every X Time, bijv. 24."
+        },
+        "interval_unit": {
+          "name": "Interval-eenheid",
+          "description": "Gebruikt bij Image Rotation Schedule: Every X Time -- minutes, hours, of days."
+        },
+        "days": {
+          "name": "Select Days",
+          "description": "Gebruikt bij Image Rotation Schedule: Specific Days -- een lijst met weekdagen, bijv. monday, wednesday."
         }
       }
     }

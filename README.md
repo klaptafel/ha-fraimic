@@ -13,7 +13,7 @@
 - **Buttons**: `Refresh Display` · `Restart` · `Sleep`
 - **Sensors**: `Battery` · `Battery Voltage` · `WiFi Signal` · `IP Address` · `Next Scheduled Refresh` · `Last Seen` · `Send Status` · `Albums`
 - **Binary sensors**: `Charging` · `Charging Cable Connected` · `Reachable` · `Render Problem` · `Voice Recording` · `Keep Awake` · `Auto Update` · `Charging LED`
-- **Service**: `fraimic.send_image`
+- **Services**: `fraimic.send_image` · `fraimic.update_album`
 
 ## Settings (Configure)
 
@@ -31,11 +31,24 @@ undocumented endpoint that the frame's own firmware proxies straight through to 
 servers, so it only updates while the frame itself has real internet access, not just local network
 connectivity.
 
-The `Albums` sensor is also read-only: creating, editing, deleting, or assigning albums to a frame
-still has to be done through Fraimic's own website ([app.fraimic.com](https://app.fraimic.com)). If
-your Fraimic account has more than one frame, note that this sensor currently lists **every album
-in the account**, not just the ones assigned to this specific frame -- there's no local way to
-determine that mapping yet.
+The `fraimic.update_album` service can change an existing album's name, description, Slideshow Mode
+(on/off), Playback Mode, or Image Rotation Schedule -- find the album's `id` via the `Albums`
+sensor's `albums` attribute, then:
+
+```yaml
+service: fraimic.update_album
+data:
+  entity_id: sensor.fraimic_e_ink_canvas_albums
+  album_id: 41d321c6-1e14-4b65-ada1-769d74d03b78
+  active: false
+```
+
+Only the fields you set are changed -- everything else on the album is left alone. Creating,
+deleting, or assigning an album to a frame still has to be done through Fraimic's own website
+([app.fraimic.com](https://app.fraimic.com)); this integration doesn't touch that. If your Fraimic
+account has more than one frame, note that the `Albums` sensor currently lists **every album in the
+account**, not just the ones assigned to this specific frame -- there's no local way to determine
+that mapping yet.
 
 ### Expect a delay after changing something on app.fraimic.com
 

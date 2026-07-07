@@ -62,3 +62,101 @@ send_image:
       default: false
       selector:
         boolean:
+
+update_album:
+  name: Update album
+  description: >-
+    Updates an existing album (find its ID via the Albums sensor's
+    attributes). Only the fields you set are changed. Requires the frame
+    to have internet access, since albums live on app.fraimic.com, not
+    the frame itself.
+  fields:
+    entity_id:
+      name: Albums sensor
+      description: The Fraimic Albums sensor entity.
+      required: true
+      selector:
+        entity:
+          filter:
+            integration: fraimic
+            domain: sensor
+    album_id:
+      name: Album ID
+      description: The album's id, from the Albums sensor's attributes.
+      required: true
+      selector:
+        text:
+    name:
+      name: Name
+      description: New name for the album.
+      required: false
+      selector:
+        text:
+    description:
+      name: Description
+      description: New description for the album.
+      required: false
+      selector:
+        text:
+    active:
+      name: Slideshow Mode
+      description: Automatically rotate images.
+      required: false
+      selector:
+        boolean:
+    playback_mode:
+      name: Playback Mode
+      description: Choose how images cycle through the album.
+      required: false
+      selector:
+        select:
+          options:
+            - sequential
+            - random
+    schedule_type:
+      name: Image Rotation Schedule
+      description: >-
+        How often should images change? Replaces the album's entire
+        schedule -- always send the matching fields below for whichever
+        type you choose.
+      required: false
+      selector:
+        select:
+          options:
+            - value: interval
+              label: Every X Time
+            - value: specific_days
+              label: Specific Days
+    interval_value:
+      name: Interval value
+      description: "Used with Image Rotation Schedule: Every X Time, e.g. 24."
+      required: false
+      selector:
+        number:
+          min: 1
+          mode: box
+    interval_unit:
+      name: Interval unit
+      description: "Used with Image Rotation Schedule: Every X Time."
+      required: false
+      selector:
+        select:
+          options:
+            - minutes
+            - hours
+            - days
+    days:
+      name: Select Days
+      description: "Used with Image Rotation Schedule: Specific Days."
+      required: false
+      selector:
+        select:
+          multiple: true
+          options:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
