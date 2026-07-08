@@ -7,26 +7,16 @@
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klaptafel&repository=ha-fraimic&category=integration)
 
-When adding the integration, enter the frame's **IP address** (recommended) -- or leave the host
-field blank to scan your local network for frames automatically. Frames are also discovered
-automatically via DHCP; an already-configured entry's IP is tracked and kept up to date going
-forward, including migrating an existing `fraimic.local` entry to a tracked IP the first time it's
-seen. A hostname like `fraimic.local` still works as a manual fallback, but is ambiguous if you
-have more than one frame on the network (mDNS conflict resolution doesn't guarantee which physical
-frame answers to it).
+Add the integration and Home Assistant will find your frame on the network by itself. You can also
+type in its address yourself if you prefer.
 
 ## What you get
 
-- **Media player**: `Display` *(browse your media library and send a photo to the frame)*
+- **Media player**: `Display` -- browse your photos and send one to the frame
 - **Buttons**: `Refresh Display` · `Restart` · `Sleep`
 - **Sensors**: `Battery` · `Battery Voltage` · `WiFi Signal` · `IP Address` · `Next Scheduled Refresh` · `Last Seen` · `Send Status` · `Albums`
 - **Binary sensors**: `Charging` · `Charging Cable Connected` · `Reachable` · `Render Problem` · `Voice Recording` · `Keep Awake` · `Auto Update` · `Charging LED`
 - **Services**: `fraimic.send_image` · `fraimic.update_album`
-- **Panel sizes**: both the 13.3" and 31.5" Fraimic panels are supported -- the size is
-  auto-detected and shown as the device's model, and images are converted to fit whichever panel
-  you have.
-- **`Battery`** also exposes cycle count, health %, current, and temperature as attributes, when
-  your frame's firmware reports them.
 
 ## Settings (Configure)
 
@@ -34,19 +24,13 @@ frame answers to it).
 - **Default fit**: `fit` `fill`
 - **Default dithering**: `none` `floyd_steinberg` `atkinson` `ordered` `burkes` `stucki` `sierra` `sierra_lite` `jarvis_judice_ninke`
 
-These apply to taps in the media browser. The `send_image` service can always override fit/dither per call.
+These apply when you tap a photo in the media browser. The `send_image` service can always override fit/dithering per call.
 
-## Local vs. cloud
+## Albums
 
-Everything in this integration talks directly to the frame over your LAN -- no internet connection
-needed for the frame or Home Assistant -- **except the `Albums` sensor**. That one calls an
-undocumented endpoint that the frame's own firmware proxies straight through to Fraimic's cloud
-servers, so it only updates while the frame itself has real internet access, not just local network
-connectivity.
-
-The `fraimic.update_album` service can change an existing album's name, description, Slideshow Mode
-(on/off), Playback Mode, or Image Rotation Schedule -- find the album's `id` via the `Albums`
-sensor's `albums` attribute, then:
+Editing an album's name, description, Slideshow Mode, Playback Mode, or rotation schedule needs
+your frame to be connected to the internet (not just your home network), since albums live on
+Fraimic's own servers. Find the album's `id` in the `Albums` sensor's attributes, then:
 
 ```yaml
 service: fraimic.update_album
@@ -56,25 +40,9 @@ data:
   active: false
 ```
 
-Only the fields you set are changed -- everything else on the album is left alone. Creating,
-deleting, or assigning an album to a frame still has to be done through Fraimic's own website
-([app.fraimic.com](https://app.fraimic.com)); this integration doesn't touch that. If your Fraimic
-account has more than one frame, note that the `Albums` sensor currently lists **every album in the
-account**, not just the ones assigned to this specific frame -- there's no local way to determine
-that mapping yet.
+Only the fields you set are changed -- the rest of the album stays untouched. Creating, deleting,
+or assigning an album to a frame still has to be done on [app.fraimic.com](https://app.fraimic.com).
 
-### Expect a delay after changing something on app.fraimic.com
-
-Nothing here is instant. A change made on app.fraimic.com has to travel through two hops before it
-shows up in Home Assistant:
-
-1. The frame itself has to notice the change on its own periodic sync with Fraimic's cloud (usually
-   within well under a minute).
-2. Home Assistant then has to poll the frame again to pick that up locally -- every 5 minutes for
-   most sensors (`Keep Awake`, `Voice Recording`, etc., all part of the same `/api/info` poll), or
-   every 30 minutes for `Albums` specifically (deliberately slower and gated on the frame actually
-   being reachable, since it's a cloud-proxied call).
-
-So a setting you just flipped on app.fraimic.com can take a few minutes to show up here, and an
-album edit can take up to half an hour. If you don't want to wait, call the built-in
-`homeassistant.update_entity` action on the entity to force an immediate refresh.
+Changes made on app.fraimic.com can take a few minutes to show up here, and album edits
+specifically can take up to half an hour. If you don't want to wait, you can refresh it yourself
+right away instead.
