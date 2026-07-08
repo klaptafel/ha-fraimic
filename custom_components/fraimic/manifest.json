@@ -3,6 +3,8 @@
   "name": "Fraimic",
   "codeowners": ["@klaptafel"],
   "config_flow": true,
+  "dependencies": ["network"],
+  "dhcp": [{"macaddress": "3CDC75*"}],
   "documentation": "https://github.com/klaptafel/ha-fraimic",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/klaptafel/ha-fraimic/issues",

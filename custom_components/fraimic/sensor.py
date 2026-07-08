@@ -46,7 +46,7 @@ from .const import (
     SCHEDULE_TYPES,
     SERVICE_UPDATE_ALBUM,
 )
-from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
+from .coordinator import FraimicAlbumsCoordinator, FraimicCoordinator
 from .entity import FraimicEntity
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
 
@@ -138,7 +138,7 @@ async def async_setup_entry(
     runtime = entry.runtime_data
 
     entities: list[SensorEntity] = [
-        FraimicBatterySensor(runtime.battery_coordinator, entry, description)
+        FraimicBatterySensor(runtime, entry, description)
         for description in BATTERY_SENSOR_DESCRIPTIONS
     ]
     entities += [
@@ -281,17 +281,43 @@ async def _async_update_album(hass: HomeAssistant, call: ServiceCall) -> None:
 
 
 class FraimicBatterySensor(FraimicEntity, SensorEntity):
-    """A value from /api/battery."""
+    """A value from /api/battery.
+
+    "percent"'s extra_state_attributes additionally surfaces battery cycle
+    count/health/current/temperature -- scraped from the undocumented
+    /info admin page (see api.get_info_page; /api/battery's JSON doesn't
+    have any of these). That scrape rides along on the main coordinator's
+    slower 5-minute poll, not this entity's own faster battery_coordinator
+    -- hence needing the whole FraimicRuntimeData, not just one coordinator.
+    """
 
     def __init__(
-        self, coordinator: FraimicBatteryCoordinator, entry: ConfigEntry, description: SensorEntityDescription
+        self, runtime: FraimicRuntimeData, entry: ConfigEntry, description: SensorEntityDescription
     ) -> None:
-        super().__init__(coordinator, entry, description.key)
+        super().__init__(runtime.battery_coordinator, entry, description.key)
         self.entity_description = description
+        self._runtime = runtime
 
     @property
     def native_value(self) -> StateType:
         return (self.coordinator.data or {}).get(self.entity_description.key)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.key != "percent":
+            return None
+        info_page = (self._runtime.coordinator.data or {}).get("info_page") or {}
+        attrs = {
+            attr: info_page[source_key]
+            for attr, source_key in (
+                ("cycles", "battery_cycles"),
+                ("health_percent", "battery_health_percent"),
+                ("current_ma", "battery_current_ma"),
+                ("temperature_c", "battery_temperature_c"),
+            )
+            if source_key in info_page
+        }
+        return attrs or None
 
 
 class FraimicInfoSensor(FraimicEntity, SensorEntity):

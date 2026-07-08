@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any, Callable
 
 import async_timeout
@@ -30,6 +31,7 @@ from .const import (
     EP_BATTERY,
     EP_IMAGE,
     EP_INFO,
+    EP_INFO_PAGE,
     EP_REFRESH,
     EP_RESTART,
     EP_SLEEP,
@@ -57,6 +59,26 @@ _KNOWN_ERROR_KEYS = frozenset(
 # otherwise reachable" case benefits here.
 _UPLOAD_MAX_ATTEMPTS = 3
 _UPLOAD_RETRY_DELAYS = (2, 5)  # seconds to wait before attempt 2 and 3
+
+# /info's rows look like:
+#   <span class='info-label'>Device Type</span><span class='info-value'>13.3" E-Ink</span>
+# Values are always a single, non-nested span for the fields we scrape here
+# (unlike the badge-wrapped ones like "Registration"/"Time Sync") -- so a
+# bare [^<]* capture is enough, and safely fails to match (rather than
+# capturing garbage) for any row shaped differently than expected.
+_PANEL_SIZE_INCHES_RE = re.compile(r'([\d.]+)\s*"')
+_LEADING_INT_RE = re.compile(r"(-?\d+)")
+
+
+def _info_page_value(html: str, label: str) -> str | None:
+    """Extract one /info row's plain-text value by its label, e.g.
+    label="Cycles" -> "0". See get_info_page for why this exists."""
+    match = re.search(
+        rf"<span class='info-label'>{re.escape(label)}</span>\s*"
+        rf"<span class='info-value'>([^<]*)</span>",
+        html,
+    )
+    return match.group(1).strip() if match else None
 
 ErrorParser = Callable[[dict[str, Any], int], "HomeAssistantError | None"]
 
@@ -133,8 +155,22 @@ async def _request_json(
             return payload
 
 
-async def get_info(session: ClientSession, host: str) -> dict[str, Any]:
-    return await _request_json(session, "GET", f"{host}{EP_INFO}")
+def normalize_host(host: str) -> str:
+    """Strip incidental whitespace/trailing slash, and default to http://
+    if no scheme was typed -- the frame has no https support, and
+    requiring the scheme just to type a bare hostname like fraimic.local
+    is friction with no benefit (aiohttp raises on a schemeless URL
+    otherwise, which would surface as a confusing "cannot_connect")."""
+    host = host.strip().rstrip("/")
+    if not host.startswith(("http://", "https://")):
+        host = f"http://{host}"
+    return host
+
+
+async def get_info(
+    session: ClientSession, host: str, request_timeout: int = DEFAULT_TIMEOUT
+) -> dict[str, Any]:
+    return await _request_json(session, "GET", f"{host}{EP_INFO}", request_timeout=request_timeout)
 
 
 async def get_battery(session: ClientSession, host: str) -> dict[str, Any]:
@@ -165,6 +201,55 @@ async def update_album(session: ClientSession, host: str, album_id: str, **field
         json=fields,
         error_parser=_cloud_error,
     )
+
+
+async def get_info_page(
+    session: ClientSession, host: str, request_timeout: int = DEFAULT_TIMEOUT
+) -> dict[str, Any]:
+    """GET /info -- an undocumented HTML admin page, NOT the JSON /api/info.
+    Scraped for a couple of fields the JSON APIs don't expose anywhere:
+    the physical panel size (e.g. "13.3", confirming which entry in a
+    future frame-type registry applies) and battery cycle count/health/
+    current/temperature (confirmed absent from /api/battery's JSON).
+
+    Best-effort only, by design: this is a human-facing HTML page with no
+    documented stability guarantee (unlike the JSON APIs this integration
+    otherwise relies on), so any fetch/parse failure here just means some
+    or all fields are missing from the result -- never an exception. A
+    caller that needs this data to *do* something (like updating the
+    device registry's model) should already tolerate the value being
+    absent on any given poll.
+    """
+    result: dict[str, Any] = {}
+    try:
+        async with async_timeout.timeout(request_timeout):
+            async with session.get(f"{host}{EP_INFO_PAGE}") as resp:
+                if resp.status != 200:
+                    return result
+                html = await resp.text()
+    except Exception:  # noqa: BLE001
+        return result
+
+    device_type = _info_page_value(html, "Device Type")
+    if device_type:
+        size_match = _PANEL_SIZE_INCHES_RE.search(device_type)
+        if size_match:
+            result["panel_size"] = size_match.group(1)
+
+    for result_key, label in (
+        ("battery_cycles", "Cycles"),
+        ("battery_health_percent", "Health (SOH)"),
+        ("battery_current_ma", "Current"),
+        ("battery_temperature_c", "Temperature"),
+    ):
+        value = _info_page_value(html, label)
+        if value is None:
+            continue
+        int_match = _LEADING_INT_RE.match(value)
+        if int_match:
+            result[result_key] = int(int_match.group(1))
+
+    return result
 
 
 async def restart(session: ClientSession, host: str) -> None:

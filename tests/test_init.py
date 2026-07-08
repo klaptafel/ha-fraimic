@@ -13,6 +13,10 @@ from custom_components.fraimic.runtime_data import device_key
 HOST = "http://1.2.3.4"
 INFO = {"device": {"device_key": "abc123"}, "firmware_version": "1.0.0"}
 BATTERY = {"percent": 77}
+INFO_PAGE_HTML = (
+    "<div class='info-row'><span class='info-label'>Device Type</span>"
+    "<span class='info-value'>13.3\" E-Ink</span></div>"
+)
 
 
 def _make_entry() -> MockConfigEntry:
@@ -33,7 +37,9 @@ async def test_setup_entry_success_registers_device_and_runtime_data(
     assert entry.state is ConfigEntryState.LOADED
     runtime = entry.runtime_data
     assert runtime.base_url == HOST
-    assert runtime.coordinator.data == INFO
+    # info_page is always present -- get_info_page never raises, it just
+    # returns {} when (as here) /info isn't mocked/reachable.
+    assert runtime.coordinator.data == {**INFO, "info_page": {}}
     assert runtime.battery_coordinator.data == BATTERY
 
     device_reg = dr.async_get(hass)
@@ -41,6 +47,7 @@ async def test_setup_entry_success_registers_device_and_runtime_data(
     assert device is not None
     assert device.manufacturer == "Fraimic"
     assert device.sw_version == "1.0.0"
+    assert device.model == "E-Ink Canvas (Spectra 6)"
     assert device.configuration_url == HOST
 
 
@@ -135,6 +142,49 @@ async def test_removing_entry_deletes_persisted_image(hass: HomeAssistant, aiocl
     leftover = FraimicImageStore(hass, entry.entry_id)
     await leftover.async_load()
     assert leftover.content is None
+
+
+async def test_device_model_reflects_detected_panel_size_at_setup(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    aioclient_mock.get(f"{HOST}/api/info", json=INFO)
+    aioclient_mock.get(f"{HOST}/api/battery", json=BATTERY)
+    aioclient_mock.get(f"{HOST}/info", text=INFO_PAGE_HTML)
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    device_reg = dr.async_get(hass)
+    device = device_reg.async_get_device(identifiers={(DOMAIN, device_key(entry))})
+    assert device.model == 'E-Ink Canvas 13.3" (Spectra 6)'
+
+
+async def test_device_model_syncs_once_detection_succeeds_on_later_refresh(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """/info isn't mocked the first time around -- model detection fails
+    silently (see get_info_page) and the generic fallback model is used --
+    then succeeds on a later poll, same self-healing shape as firmware
+    version syncing."""
+    aioclient_mock.get(f"{HOST}/api/info", json=INFO)
+    aioclient_mock.get(f"{HOST}/api/battery", json=BATTERY)
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    device_reg = dr.async_get(hass)
+    device = device_reg.async_get_device(identifiers={(DOMAIN, device_key(entry))})
+    assert device.model == "E-Ink Canvas (Spectra 6)"
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{HOST}/api/info", json=INFO)
+    aioclient_mock.get(f"{HOST}/info", text=INFO_PAGE_HTML)
+    await entry.runtime_data.coordinator.async_refresh()
+
+    device = device_reg.async_get_device(identifiers={(DOMAIN, device_key(entry))})
+    assert device.model == 'E-Ink Canvas 13.3" (Spectra 6)'
 
 
 async def test_firmware_version_syncs_to_device_on_later_refresh(

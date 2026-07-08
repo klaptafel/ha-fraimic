@@ -7,6 +7,14 @@
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klaptafel&repository=ha-fraimic&category=integration)
 
+When adding the integration, enter the frame's **IP address** (recommended) -- or leave the host
+field blank to scan your local network for frames automatically. Frames are also discovered
+automatically via DHCP; an already-configured entry's IP is tracked and kept up to date going
+forward, including migrating an existing `fraimic.local` entry to a tracked IP the first time it's
+seen. A hostname like `fraimic.local` still works as a manual fallback, but is ambiguous if you
+have more than one frame on the network (mDNS conflict resolution doesn't guarantee which physical
+frame answers to it).
+
 ## What you get
 
 - **Media player**: `Display` *(browse your media library and send a photo to the frame)*
@@ -14,6 +22,11 @@
 - **Sensors**: `Battery` · `Battery Voltage` · `WiFi Signal` · `IP Address` · `Next Scheduled Refresh` · `Last Seen` · `Send Status` · `Albums`
 - **Binary sensors**: `Charging` · `Charging Cable Connected` · `Reachable` · `Render Problem` · `Voice Recording` · `Keep Awake` · `Auto Update` · `Charging LED`
 - **Services**: `fraimic.send_image` · `fraimic.update_album`
+- **Panel sizes**: both the 13.3" and 31.5" Fraimic panels are supported -- the size is
+  auto-detected and shown as the device's model, and images are converted to fit whichever panel
+  you have.
+- **`Battery`** also exposes cycle count, health %, current, and temperature as attributes, when
+  your frame's firmware reports them.
 
 ## Settings (Configure)
 

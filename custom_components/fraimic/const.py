@@ -7,6 +7,10 @@ CONF_HOST = "host"
 
 DEFAULT_SCAN_INTERVAL = timedelta(minutes=5)
 DEFAULT_TIMEOUT = 10
+# Short timeout used while probing candidate addresses during discovery --
+# a dead host needs to fail fast, not hang for the normal 10s (see
+# discovery.probe_frame, used to check up to 254 addresses concurrently).
+DISCOVERY_PROBE_TIMEOUT = 1
 
 # API endpoints (relative to http://<host>)
 EP_INFO = "/api/info"
@@ -17,16 +21,17 @@ EP_REFRESH = "/api/refresh"
 EP_IMAGE = "/api/image"
 # Not in the official API guide -- see api.get_albums for why.
 EP_ALBUMS = "/api/albums"
+# An HTML admin page (not JSON) -- see api.get_info_page for why we scrape it.
+EP_INFO_PAGE = "/info"
 
 DEFAULT_BATTERY_SCAN_INTERVAL = timedelta(seconds=60)
 # Cloud-proxied and not time-sensitive -- much slower than the main poll,
 # and gated on device_reachable besides (see FraimicAlbumsCoordinator).
 DEFAULT_ALBUMS_SCAN_INTERVAL = timedelta(minutes=30)
 
-# Spectra 6 panel geometry (EL133UF1 controller)
-PANEL_WIDTH = 1200
-PANEL_HEIGHT = 1600
-PANEL_BIN_SIZE = 960_000  # bytes
+# Spectra 6 panel geometry lives in frame_types.py, keyed by the size
+# detected via api.get_info_page -- not a single hardcoded pair here,
+# since Fraimic ships more than one physical panel size.
 
 # Service for pushing a local file straight to the frame, bypassing the
 # media browser (handy from automations/scripts).

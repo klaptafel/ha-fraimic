@@ -31,6 +31,61 @@ async def test_get_albums_success(hass: HomeAssistant, aioclient_mock) -> None:
     assert result == {"albums": []}
 
 
+_INFO_PAGE_HTML = """
+<div class='info-row'><span class='info-label'>Device Type</span><span class='info-value'>13.3" E-Ink</span></div>
+<div class='info-row'><span class='info-label'>Cycles</span><span class='info-value'>12</span></div>
+<div class='info-row'><span class='info-label'>Health (SOH)</span><span class='info-value'>97%</span></div>
+<div class='info-row'><span class='info-label'>Current</span><span class='info-value'>-47 mA</span></div>
+<div class='info-row'><span class='info-label'>Temperature</span><span class='info-value'>25&deg;C</span></div>
+<div class='info-row'><span class='info-label'>Registration</span><span class='info-value'><span class='status-badge status-green'>Complete</span></span></div>
+"""
+
+
+async def test_get_info_page_parses_all_known_fields(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{HOST}/info", text=_INFO_PAGE_HTML)
+    result = await api.get_info_page(async_get_clientsession(hass), HOST)
+    assert result == {
+        "panel_size": "13.3",
+        "battery_cycles": 12,
+        "battery_health_percent": 97,
+        "battery_current_ma": -47,
+        "battery_temperature_c": 25,
+    }
+
+
+async def test_get_info_page_returns_empty_dict_on_connection_error(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """Best-effort by design -- a fetch failure here must never raise,
+    just mean fewer/no fields (see get_info_page's docstring)."""
+    aioclient_mock.get(f"{HOST}/info", exc=aiohttp.ClientError)
+    result = await api.get_info_page(async_get_clientsession(hass), HOST)
+    assert result == {}
+
+
+async def test_get_info_page_returns_empty_dict_on_non_200(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    aioclient_mock.get(f"{HOST}/info", status=404, text="not found")
+    result = await api.get_info_page(async_get_clientsession(hass), HOST)
+    assert result == {}
+
+
+async def test_get_info_page_omits_unparseable_fields(hass: HomeAssistant, aioclient_mock) -> None:
+    """A row present but not shaped as expected (missing entirely, or a
+    value that doesn't start with a number) is just omitted, not a crash
+    or a bogus value -- this page has no stability guarantee."""
+    aioclient_mock.get(
+        f"{HOST}/info",
+        text=(
+            "<div class='info-row'><span class='info-label'>Cycles</span>"
+            "<span class='info-value'>unknown</span></div>"
+        ),
+    )
+    result = await api.get_info_page(async_get_clientsession(hass), HOST)
+    assert result == {}
+
+
 async def test_update_album_sends_only_passed_fields(hass: HomeAssistant, aioclient_mock) -> None:
     aioclient_mock.put(f"{HOST}/api/albums/abc-123", json={"id": "abc-123", "active": True})
     result = await api.update_album(async_get_clientsession(hass), HOST, "abc-123", active=True)

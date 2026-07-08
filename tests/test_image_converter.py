@@ -7,7 +7,12 @@ import pytest
 from PIL import Image
 
 from custom_components.fraimic import image_converter
-from custom_components.fraimic.const import DITHER_MODES, PANEL_BIN_SIZE, PANEL_HEIGHT, PANEL_WIDTH
+from custom_components.fraimic.const import DITHER_MODES
+from custom_components.fraimic.frame_types import FRAME_TYPES
+
+PANEL_WIDTH = FRAME_TYPES["13.3"].width
+PANEL_HEIGHT = FRAME_TYPES["13.3"].height
+PANEL_BIN_SIZE = FRAME_TYPES["13.3"].bin_size
 
 
 def _solid_jpeg_bytes(width: int, height: int, color: tuple[int, int, int]) -> bytes:
@@ -23,7 +28,7 @@ def test_pack_bin_nibble_order_and_halves() -> None:
     indices[1] = 3  # red
     indices[600] = 5  # green (start of the right half of row 0)
 
-    packed = image_converter._pack_bin(indices)
+    packed = image_converter._pack_bin(indices, PANEL_WIDTH, PANEL_HEIGHT)
 
     assert len(packed) == PANEL_BIN_SIZE
     bytes_per_half_row = PANEL_WIDTH // 4
@@ -39,6 +44,68 @@ def test_pack_bin_nibble_order_and_halves() -> None:
     assert right[1] == 0x00
 
 
+def test_pack_bin_31_5_inch_layout() -> None:
+    """The 31.5" panel splits at column 1280 (half of 2560), not 600 --
+    confirms _pack_bin's loop bounds generalize, not just its byte count."""
+    frame_type = FRAME_TYPES["31.5"]
+    width, height = frame_type.width, frame_type.height
+    indices = bytearray(width * height)
+    indices[width // 2] = 5  # green: first pixel of the right half of row 0
+
+    packed = image_converter._pack_bin(indices, width, height)
+
+    assert len(packed) == frame_type.bin_size
+    bytes_per_half_row = width // 4
+    left, right = packed[: len(packed) // 2], packed[len(packed) // 2 :]
+    assert len(left) == len(right) == height * bytes_per_half_row
+    assert right[0] == 0x60
+    assert left[0] == 0x00
+
+
+def test_convert_image_31_5_inch_produces_correctly_sized_output() -> None:
+    frame_type = FRAME_TYPES["31.5"]
+    raw = _solid_jpeg_bytes(400, 300, (200, 30, 30))
+
+    bin_data, preview_png = image_converter.convert_image(
+        raw, fit="fill", device_orientation="landscape", dither="none",
+        width=frame_type.width, height=frame_type.height,
+    )
+
+    assert len(bin_data) == frame_type.bin_size
+    preview = Image.open(io.BytesIO(preview_png))
+    assert preview.size == (frame_type.width, frame_type.height)
+
+
+def test_landscape_native_panel_orientation_generalization() -> None:
+    """The 31.5" panel is native-landscape (2560x1440, width > height) --
+    the inverse of the only panel this integration shipped with before.
+    device_orientation="portrait" must now be the one that rotates (onto
+    the landscape-native buffer), and "landscape" must be the one that
+    doesn't -- backwards from the 13.3" case, confirming the
+    is_native_landscape/rotate_needed generalization in _fit_image."""
+    frame_type = FRAME_TYPES["31.5"]
+    width, height = frame_type.width, frame_type.height
+
+    # A stripe near the top edge -- if "portrait" rotates onto the native
+    # landscape buffer and "landscape" doesn't, the two outputs must differ.
+    img = Image.new("RGB", (width, height), (0, 0, 0))
+    for x in range(width):
+        for y in range(20):
+            img.putpixel((x, y), (255, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    raw = buf.getvalue()
+
+    portrait_bin, _ = image_converter.convert_image(
+        raw, fit="fill", device_orientation="portrait", dither="none", width=width, height=height
+    )
+    landscape_bin, _ = image_converter.convert_image(
+        raw, fit="fill", device_orientation="landscape", dither="none", width=width, height=height
+    )
+
+    assert portrait_bin != landscape_bin
+
+
 @pytest.mark.parametrize("fit", ["fit", "fill"])
 @pytest.mark.parametrize("device_orientation", ["portrait", "landscape"])
 @pytest.mark.parametrize("dither", DITHER_MODES)
@@ -46,7 +113,8 @@ def test_convert_image_produces_correctly_sized_output(fit, device_orientation, 
     raw = _solid_jpeg_bytes(400, 300, (200, 30, 30))
 
     bin_data, preview_png = image_converter.convert_image(
-        raw, fit=fit, device_orientation=device_orientation, dither=dither
+        raw, fit=fit, device_orientation=device_orientation, dither=dither,
+        width=PANEL_WIDTH, height=PANEL_HEIGHT,
     )
 
     assert len(bin_data) == PANEL_BIN_SIZE
@@ -60,8 +128,12 @@ def test_fit_pads_with_black_fill_does_not() -> None:
     # to cover, so it should have far less pure-black content.
     raw = _solid_jpeg_bytes(2000, 100, (255, 255, 255))
 
-    fit_bin, _ = image_converter.convert_image(raw, fit="fit", dither="none")
-    fill_bin, _ = image_converter.convert_image(raw, fit="fill", dither="none")
+    fit_bin, _ = image_converter.convert_image(
+        raw, fit="fit", dither="none", width=PANEL_WIDTH, height=PANEL_HEIGHT
+    )
+    fill_bin, _ = image_converter.convert_image(
+        raw, fit="fill", dither="none", width=PANEL_WIDTH, height=PANEL_HEIGHT
+    )
 
     black_code = image_converter._CODE_FOR_PALETTE_INDEX[0]
     # Packed nibble 0x00 means both pixels in that byte are black.
@@ -81,8 +153,14 @@ def test_landscape_orientation_rotates_relative_to_portrait() -> None:
     img.save(buf, format="PNG")
     raw = buf.getvalue()
 
-    portrait_bin, _ = image_converter.convert_image(raw, fit="fill", device_orientation="portrait", dither="none")
-    landscape_bin, _ = image_converter.convert_image(raw, fit="fill", device_orientation="landscape", dither="none")
+    portrait_bin, _ = image_converter.convert_image(
+        raw, fit="fill", device_orientation="portrait", dither="none",
+        width=PANEL_WIDTH, height=PANEL_HEIGHT,
+    )
+    landscape_bin, _ = image_converter.convert_image(
+        raw, fit="fill", device_orientation="landscape", dither="none",
+        width=PANEL_WIDTH, height=PANEL_HEIGHT,
+    )
 
     assert portrait_bin != landscape_bin
 
@@ -118,7 +196,9 @@ def test_convert_image_logs_exif_correction(monkeypatch, caplog) -> None:
     img.save(buf, format="JPEG", exif=exif)
 
     with caplog.at_level("DEBUG", logger="custom_components.fraimic.image_converter"):
-        bin_data, _ = image_converter.convert_image(buf.getvalue(), fit="fit", dither="none")
+        bin_data, _ = image_converter.convert_image(
+            buf.getvalue(), fit="fit", dither="none", width=PANEL_WIDTH, height=PANEL_HEIGHT
+        )
     assert len(bin_data) == PANEL_BIN_SIZE
     assert "EXIF orientation" in caplog.text
 
@@ -135,4 +215,6 @@ def test_convert_image_propagates_library_dither_errors(monkeypatch) -> None:
     raw = _solid_jpeg_bytes(400, 300, (5, 5, 200))
 
     with pytest.raises(RuntimeError, match="epaper_dithering blew up"):
-        image_converter.convert_image(raw, fit="fit", dither="floyd_steinberg")
+        image_converter.convert_image(
+            raw, fit="fit", dither="floyd_steinberg", width=PANEL_WIDTH, height=PANEL_HEIGHT
+        )

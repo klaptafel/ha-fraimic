@@ -26,9 +26,31 @@ async def test_info_coordinator_success(hass: HomeAssistant, aioclient_mock) -> 
     await coordinator.async_refresh()
 
     assert coordinator.last_update_success is True
-    assert coordinator.data == {"device": {"device_key": "abc"}}
+    # info_page is always present -- get_info_page never raises, it just
+    # returns {} when (as here) /info isn't mocked/reachable.
+    assert coordinator.data == {"device": {"device_key": "abc"}, "info_page": {}}
     assert coordinator.device_reachable is True
     assert coordinator.last_success is not None
+
+
+async def test_info_coordinator_merges_info_page(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{HOST}/api/info", json={"device": {"device_key": "abc"}})
+    aioclient_mock.get(
+        f"{HOST}/info",
+        text=(
+            "<div class='info-row'><span class='info-label'>Device Type</span>"
+            "<span class='info-value'>13.3\" E-Ink</span></div>"
+        ),
+    )
+    coordinator = FraimicCoordinator(hass, HOST)
+
+    await coordinator.async_refresh()
+
+    assert coordinator.last_update_success is True
+    assert coordinator.data == {
+        "device": {"device_key": "abc"},
+        "info_page": {"panel_size": "13.3"},
+    }
 
 
 async def test_battery_coordinator_success(hass: HomeAssistant, aioclient_mock) -> None:

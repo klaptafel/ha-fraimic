@@ -5,16 +5,19 @@ from https://github.com/Fraimic/fraimic_bin_converter, so it can run
 in-process (via hass.async_add_executor_job) instead of shelling out to a
 separate Python script.
 
-Output format (EL133UF1 / Spectra 6):
-- 1200 x 1600 pixels, portrait.
+Output format (Spectra 6, both known panel sizes -- see frame_types.py):
+- 1200 x 1600 pixels portrait (13.3", EL133UF1) or 2560 x 1440 pixels
+  landscape (31.5") -- the pixel dimensions vary by physical panel, but
+  the byte layout below is identical for both.
 - 6 colors, 4-bit device code per pixel:
     black=0x0, white=0x1, yellow=0x2, red=0x3, blue=0x5, green=0x6
   (0x4 is intentionally unused by the panel.)
 - 4-bit indexed, two pixels per byte (high nibble = even column, low
   nibble = odd column).
-- Each row is split into a left half (columns 0-599) and a right half
-  (columns 600-1199). ALL left-half bytes for the whole image come first,
-  then ALL right-half bytes. Total size is always exactly 960,000 bytes.
+- Each row is split into a left half (columns 0 .. width//2 - 1) and a
+  right half (columns width//2 .. width - 1). ALL left-half bytes for the
+  whole image come first, then ALL right-half bytes. Total size is
+  always exactly width * height // 2 bytes.
 
 Dithering is done by the required `epaper-dithering` package (Rust core,
 https://github.com/OpenDisplay/epaper-dithering): OKLab color matching,
@@ -41,8 +44,6 @@ import logging
 import epaper_dithering as _epaper_dithering
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-from .const import PANEL_HEIGHT, PANEL_WIDTH
-
 _LOGGER = logging.getLogger(__name__)
 
 # Palette order must match the code table below 1:1.
@@ -62,24 +63,35 @@ _CONTRAST = 1.2
 _SATURATION = 1.2
 
 
-def _fit_image(img: Image.Image, fit: str, device_orientation: str) -> Image.Image:
+def _fit_image(img: Image.Image, fit: str, device_orientation: str, width: int, height: int) -> Image.Image:
     """Fit `img` onto a canvas matching the panel's native buffer shape.
 
-    The panel's native buffer is ALWAYS PANEL_WIDTH x PANEL_HEIGHT
-    (1200x1600) -- a hardware fact that never changes. `device_orientation`
-    is about compensating for how the frame is physically mounted:
-    - "portrait": compose directly against the native 1200x1600 canvas.
-    - "landscape": compose against a visually-1600x1200 canvas instead
-      (matching what a viewer actually sees), then rotate the whole
-      composed result 90 degrees into the native buffer shape at the end.
+    `width`/`height` are the panel's native buffer dimensions -- a
+    hardware fact that never changes for a given physical panel, but
+    differs between panel sizes (e.g. portrait-native 1200x1600 for the
+    13.3", landscape-native 2560x1440 for the 31.5" -- see frame_types.py).
+    `device_orientation` is a *visual* preference, independent of which
+    shape happens to be native: "portrait" always means compose against a
+    canvas taller than it is wide, "landscape" always means wider than
+    tall, regardless of the native buffer's own shape. Composing then
+    rotates onto the native buffer only when the two shapes differ --
+    e.g. "portrait" on a landscape-native panel does rotate; "landscape"
+    on a portrait-native panel (the only case this integration has ever
+    shipped before) also rotates, exactly as before.
 
     `fit`: "fit" (show the whole image, pad with black -- CSS
     object-fit: contain) or "fill" (fill the frame, cropping overflow --
     CSS object-fit: cover) -- applied against whichever canvas shape
     `device_orientation` selects.
     """
-    landscape_target = device_orientation == "landscape"
-    visual_w, visual_h = (PANEL_HEIGHT, PANEL_WIDTH) if landscape_target else (PANEL_WIDTH, PANEL_HEIGHT)
+    is_native_landscape = width > height
+    want_landscape_canvas = device_orientation == "landscape"
+    visual_w, visual_h = (
+        (max(width, height), min(width, height))
+        if want_landscape_canvas
+        else (min(width, height), max(width, height))
+    )
+    rotate_needed = want_landscape_canvas != is_native_landscape
 
     steps: list[str] = [f"input={img.size}", f"visual_canvas_target={visual_w}x{visual_h}"]
 
@@ -112,12 +124,14 @@ def _fit_image(img: Image.Image, fit: str, device_orientation: str) -> Image.Ima
         result = canvas
         steps.append(f"fit: resized={resized.size} padded_canvas={result.size}")
 
-    if landscape_target:
-        # Rotation direction is a guess (clockwise) -- unconfirmed which
-        # way matches a real landscape mounting. If it comes out upside
-        # down or sideways, this is the line to flip (change -90 to 90).
+    if rotate_needed:
+        # Rotation direction is a guess (clockwise) -- unconfirmed on
+        # either known panel size (no hardware here to test the 31.5"
+        # against, and the 13.3" case is separately flagged as untested
+        # too). If content comes out upside down or sideways, this is the
+        # line to flip (change -90 to 90).
         result = result.rotate(-90, expand=True)
-        steps.append(f"landscape_final_rotate(-90)={result.size}")
+        steps.append(f"rotate(-90)={result.size}")
 
     _LOGGER.debug(
         "_fit_image pipeline (fit=%s, device_orientation=%s): %s",
@@ -168,38 +182,38 @@ def _library_dither_indices(img: Image.Image, dither: str) -> bytearray:
     return indices
 
 
-def _pack_bin(indices: bytes | bytearray) -> bytes:
+def _pack_bin(indices: bytes | bytearray, width: int, height: int) -> bytes:
     """indices: flat, row-major buffer of palette indices (0-5), length
-    PANEL_WIDTH * PANEL_HEIGHT."""
-    bytes_per_half_row = PANEL_WIDTH // 4  # 300
-    left = bytearray(PANEL_HEIGHT * bytes_per_half_row)
-    right = bytearray(PANEL_HEIGHT * bytes_per_half_row)
+    width * height."""
+    bytes_per_half_row = width // 4
+    left = bytearray(height * bytes_per_half_row)
+    right = bytearray(height * bytes_per_half_row)
 
     li = 0
     ri = 0
-    for y in range(PANEL_HEIGHT):
-        row_offset = y * PANEL_WIDTH
-        for x in range(0, PANEL_WIDTH // 2, 2):
+    for y in range(height):
+        row_offset = y * width
+        for x in range(0, width // 2, 2):
             hi = _CODE_FOR_PALETTE_INDEX[indices[row_offset + x]]
             lo = _CODE_FOR_PALETTE_INDEX[indices[row_offset + x + 1]]
             left[li] = (hi << 4) | lo
             li += 1
-        for x in range(PANEL_WIDTH // 2, PANEL_WIDTH, 2):
+        for x in range(width // 2, width, 2):
             hi = _CODE_FOR_PALETTE_INDEX[indices[row_offset + x]]
             lo = _CODE_FOR_PALETTE_INDEX[indices[row_offset + x + 1]]
             right[ri] = (hi << 4) | lo
             ri += 1
 
-    assert li == PANEL_HEIGHT * bytes_per_half_row
-    assert ri == PANEL_HEIGHT * bytes_per_half_row
+    assert li == height * bytes_per_half_row
+    assert ri == height * bytes_per_half_row
     return bytes(left) + bytes(right)
 
 
-def _indices_to_preview_png(indices: bytes | bytearray) -> bytes:
+def _indices_to_preview_png(indices: bytes | bytearray, width: int, height: int) -> bytes:
     pal_img = _build_palette_image()
     palette = pal_img.getpalette()
     assert palette is not None  # set by _build_palette_image's own putpalette() call
-    out = Image.frombytes("P", (PANEL_WIDTH, PANEL_HEIGHT), bytes(indices))
+    out = Image.frombytes("P", (width, height), bytes(indices))
     out.putpalette(palette)
     buf = io.BytesIO()
     out.save(buf, format="PNG")
@@ -212,12 +226,19 @@ def convert_image(
     fit: str = "fit",
     device_orientation: str = "portrait",
     dither: str = "floyd_steinberg",
+    width: int,
+    height: int,
 ) -> tuple[bytes, bytes]:
     """Convert raw image bytes (jpg/png/etc.) into a Spectra 6 .bin blob.
 
     All arguments after `raw_bytes` are keyword-only, deliberately --
     this function has enough similarly-typed str parameters that
     positional calls are an easy way to silently swap two of them.
+    `width`/`height` have no default for the same reason, just more so:
+    silently defaulting to one panel's dimensions is exactly the kind of
+    mistake that produces a garbled image on a *different* physical
+    panel with no error at all (see frame_types.py for where these
+    actually come from -- the frame's detected physical size).
 
     `fit`: "fit" (show the whole image, pad with black -- CSS
     object-fit: contain) or "fill" (fill the frame, cropping overflow --
@@ -228,11 +249,14 @@ def convert_image(
     `dither`: "none", "floyd_steinberg", "atkinson", "ordered", "burkes",
     "stucki", "sierra", "sierra_lite", or "jarvis_judice_ninke" -- all 9
     algorithms epaper_dithering supports.
+    `width`/`height`: the target panel's native buffer dimensions (see
+    frame_types.FrameType).
     Always uses the theoretical BWGBRY palette (see module docstring).
 
     Returns (bin_data, preview_png). preview_png is the quantized/dithered
-    1200x1600 image re-encoded as PNG -- i.e. exactly what will show up on
-    the panel -- used as the media player's entity picture.
+    image re-encoded as PNG at the panel's native dimensions -- i.e.
+    exactly what will show up on the panel -- used as the media player's
+    entity picture.
 
     Runs synchronously/CPU-bound -- call via hass.async_add_executor_job.
     """
@@ -261,11 +285,11 @@ def convert_image(
     img = img.filter(ImageFilter.SMOOTH)
     img = img.filter(ImageFilter.SHARPEN)
 
-    img = _fit_image(img, fit, device_orientation)
+    img = _fit_image(img, fit, device_orientation, width, height)
 
     indices = _library_dither_indices(img, dither)
 
-    bin_data = _pack_bin(indices)
-    preview_png = _indices_to_preview_png(indices)
+    bin_data = _pack_bin(indices, width, height)
+    preview_png = _indices_to_preview_png(indices, width, height)
 
     return bin_data, preview_png

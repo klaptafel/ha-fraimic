@@ -16,6 +16,7 @@ it was asleep".
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -89,13 +90,21 @@ class FraimicBaseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
 
 class FraimicCoordinator(FraimicBaseCoordinator):
-    """Polls /api/info."""
+    """Polls /api/info, plus the /info admin page (see api.get_info_page)
+    for the couple of fields the JSON API doesn't expose at all -- merged
+    in under the "info_page" key so readers can tell at a glance it's from
+    that separate, best-effort source, not /api/info's own JSON."""
 
     def __init__(self, hass: HomeAssistant, host: str) -> None:
         super().__init__(hass, host, f"{DOMAIN}_info", DEFAULT_SCAN_INTERVAL)
 
     async def _fetch(self, session: ClientSession) -> dict[str, Any]:
-        return await api.get_info(session, self.base_url)
+        data, info_page = await asyncio.gather(
+            api.get_info(session, self.base_url),
+            api.get_info_page(session, self.base_url),
+        )
+        data["info_page"] = info_page
+        return data
 
 
 class FraimicBatteryCoordinator(FraimicBaseCoordinator):

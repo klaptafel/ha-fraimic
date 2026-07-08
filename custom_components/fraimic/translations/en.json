@@ -1,28 +1,42 @@
 {
   "config": {
+    "flow_title": "{model} ({ip})",
     "step": {
       "user": {
         "title": "Connect Fraimic frame",
-        "description": "Use the frame's address, e.g. fraimic.local -- this keeps working even if the frame later gets a new IP. If you have more than one frame, check each one's own hostname in your router's DHCP list first (fraimic.local always points to just one of them), or use a fixed IP instead.",
+        "description": "Enter the frame's IP address (recommended -- see why below), or leave this blank to scan your network for frames. A hostname like fraimic.local also still works, but won't automatically track IP changes the way a discovered or IP-based entry does, and is ambiguous if you have more than one frame.",
         "data": {
           "host": "Host"
         }
       },
+      "pick_device": {
+        "title": "Select a frame",
+        "description": "These frames were found on your network.",
+        "data": {
+          "host": "[%key:common::config_flow::data::device%]"
+        }
+      },
+      "dhcp_confirm": {
+        "title": "Fraimic frame discovered",
+        "description": "A Fraimic {model} frame was found at {ip}. Add it to Home Assistant?"
+      },
       "reconfigure": {
         "title": "Change Fraimic address",
-        "description": "Update the frame's address. fraimic.local keeps working across IP changes for a single frame; with more than one frame, use each frame's own hostname or a fixed IP.",
+        "description": "Update the frame's address. An IP address is recommended; fraimic.local (or another hostname) still works but won't get automatic IP-change tracking.",
         "data": {
           "host": "Host"
         }
       }
     },
     "error": {
-      "cannot_connect": "Couldn't connect. Check that the frame is awake and connected."
+      "cannot_connect": "Couldn't connect. Check that the frame is awake and connected.",
+      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]"
     },
     "abort": {
       "already_configured": "This frame is already configured.",
       "reconfigure_successful": "Address updated.",
-      "wrong_device": "This is a different physical frame than the one you're reconfiguring."
+      "wrong_device": "This is a different physical frame than the one you're reconfiguring.",
+      "not_fraimic_device": "The device found on your network doesn't look like a Fraimic frame."
     }
   },
   "entity": {
@@ -57,7 +71,7 @@
   },
   "exceptions": {
     "invalid_image_size": {
-      "message": "File is not the correct size (expected exactly 960,000 bytes)."
+      "message": "File is not the correct size for this panel's resolution."
     },
     "file_too_large": {
       "message": "File is larger than the frame's 1 MB limit."

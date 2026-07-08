@@ -54,6 +54,52 @@ async def test_battery_sensors(hass: HomeAssistant, aioclient_mock) -> None:
     assert voltage_entry.disabled_by is not None
 
 
+async def test_battery_sensor_shows_health_attributes_from_info_page(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """Cycles/health/current/temperature come from the /info HTML scrape
+    (not /api/battery's JSON, which doesn't have them), polled by the main
+    coordinator -- only the "percent" sensor shows them, not Battery Voltage."""
+    aioclient_mock.get(
+        f"{HOST}/info",
+        text=(
+            "<div class='info-row'><span class='info-label'>Cycles</span>"
+            "<span class='info-value'>12</span></div>"
+            "<div class='info-row'><span class='info-label'>Health (SOH)</span>"
+            "<span class='info-value'>97%</span></div>"
+            "<div class='info-row'><span class='info-label'>Current</span>"
+            "<span class='info-value'>-47 mA</span></div>"
+            "<div class='info-row'><span class='info-label'>Temperature</span>"
+            "<span class='info-value'>25&deg;C</span></div>"
+        ),
+    )
+    entry = await _setup(hass, aioclient_mock)
+
+    percent_state = hass.states.get(_entity_id(hass, "sensor", "percent"))
+    assert percent_state.attributes["cycles"] == 12
+    assert percent_state.attributes["health_percent"] == 97
+    assert percent_state.attributes["current_ma"] == -47
+    assert percent_state.attributes["temperature_c"] == 25
+
+    from custom_components.fraimic.sensor import FraimicBatterySensor, BATTERY_SENSOR_DESCRIPTIONS
+
+    voltage_description = next(d for d in BATTERY_SENSOR_DESCRIPTIONS if d.key == "voltage_mv")
+    voltage_sensor = FraimicBatterySensor(entry.runtime_data, entry, voltage_description)
+    assert voltage_sensor.extra_state_attributes is None
+
+
+async def test_battery_sensor_no_attributes_without_info_page_data(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """No /info mocked -- info_page ends up {} -- must be no attributes at
+    all, not a dict of Nones."""
+    await _setup(hass, aioclient_mock)
+
+    percent_state = hass.states.get(_entity_id(hass, "sensor", "percent"))
+    for key in ("cycles", "health_percent", "current_ma", "temperature_c"):
+        assert key not in percent_state.attributes
+
+
 async def test_info_sensors(hass: HomeAssistant, aioclient_mock) -> None:
     await _setup(hass, aioclient_mock)
 

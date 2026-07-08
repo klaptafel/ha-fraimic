@@ -1,28 +1,42 @@
 {
   "config": {
+    "flow_title": "{model} ({ip})",
     "step": {
       "user": {
         "title": "Fraimic frame verbinden",
-        "description": "Gebruik het adres van het frame, bv. fraimic.local -- dit blijft werken ook als het frame later een nieuw IP krijgt. Heb je meer dan één frame, check dan eerst de hostname van elk frame in de DHCP-lijst van je router (fraimic.local wijst altijd naar maar één ervan), of gebruik een vast IP-adres.",
+        "description": "Vul het IP-adres van het frame in (aanbevolen -- zie hieronder waarom), of laat dit veld leeg om je netwerk te scannen naar frames. Een hostname zoals fraimic.local werkt ook nog steeds, maar volgt IP-wijzigingen niet automatisch zoals een gevonden of IP-gebaseerde entry dat wel doet, en is dubbelzinnig als je meer dan één frame hebt.",
         "data": {
           "host": "Host"
         }
       },
+      "pick_device": {
+        "title": "Kies een frame",
+        "description": "Deze frames zijn gevonden op je netwerk.",
+        "data": {
+          "host": "[%key:common::config_flow::data::device%]"
+        }
+      },
+      "dhcp_confirm": {
+        "title": "Fraimic frame gevonden",
+        "description": "Er is een Fraimic {model} frame gevonden op {ip}. Toevoegen aan Home Assistant?"
+      },
       "reconfigure": {
         "title": "Fraimic adres wijzigen",
-        "description": "Werk het adres van het frame bij. fraimic.local blijft werken bij IP-wijzigingen voor één frame; bij meerdere frames gebruik je de eigen hostname van elk frame of een vast IP-adres.",
+        "description": "Werk het adres van het frame bij. Een IP-adres wordt aanbevolen; fraimic.local (of een andere hostname) werkt nog steeds, maar krijgt geen automatische IP-wijzigingsdetectie.",
         "data": {
           "host": "Host"
         }
       }
     },
     "error": {
-      "cannot_connect": "Kan geen verbinding maken. Controleer of het frame wakker en verbonden is."
+      "cannot_connect": "Kan geen verbinding maken. Controleer of het frame wakker en verbonden is.",
+      "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]"
     },
     "abort": {
       "already_configured": "Dit frame is al toegevoegd.",
       "reconfigure_successful": "Adres bijgewerkt.",
-      "wrong_device": "Dit is een ander fysiek frame dan degene die je aan het herconfigureren bent."
+      "wrong_device": "Dit is een ander fysiek frame dan degene die je aan het herconfigureren bent.",
+      "not_fraimic_device": "Het gevonden apparaat op je netwerk lijkt geen Fraimic frame te zijn."
     }
   },
   "entity": {
@@ -57,7 +71,7 @@
   },
   "exceptions": {
     "invalid_image_size": {
-      "message": "Bestand heeft niet de juiste grootte (verwacht exact 960.000 bytes)."
+      "message": "Bestand heeft niet de juiste grootte voor de resolutie van dit paneel."
     },
     "file_too_large": {
       "message": "Bestand is groter dan de 1 MB limiet van het frame."

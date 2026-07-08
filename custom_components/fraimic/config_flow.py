@@ -12,9 +12,15 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig
+from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+)
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
-from . import api
+from . import api, discovery
+from .api import normalize_host
 from .const import (
     CONF_DEFAULT_DITHER,
     CONF_DEFAULT_FIT,
@@ -28,22 +34,11 @@ from .const import (
     DOMAIN,
     FIT_MODES,
 )
+from .frame_types import device_model_name
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_SCHEMA = vol.Schema({vol.Required(CONF_HOST, default="fraimic.local"): str})
-
-
-def _normalize_host(host: str) -> str:
-    """Strip incidental whitespace/trailing slash, and default to http://
-    if no scheme was typed -- the frame has no https support, and
-    requiring the scheme just to type a bare hostname like fraimic.local
-    is friction with no benefit (aiohttp raises on a schemeless URL
-    otherwise, which would surface as a confusing "cannot_connect")."""
-    host = host.strip().rstrip("/")
-    if not host.startswith(("http://", "https://")):
-        host = f"http://{host}"
-    return host
+STEP_USER_SCHEMA = vol.Schema({vol.Optional(CONF_HOST, default=""): str})
 
 
 async def _validate_host(hass: HomeAssistant, host: str) -> dict[str, Any]:
@@ -72,10 +67,22 @@ def _device_key(info: dict[str, Any], fallback_host: str) -> str:
     return key or fallback_host
 
 
+def _model_of(info: dict[str, Any]) -> str:
+    """The same model string shown on the device page, but derived from a
+    discovery probe's result (see discovery.probe_frame) instead of a
+    running coordinator -- so the model can be shown before the entry
+    even exists yet."""
+    return device_model_name((info.get("info_page") or {}).get("panel_size"))
+
+
 class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Fraimic E-Ink Canvas."""
 
     VERSION = 1
+
+    def __init__(self) -> None:
+        self._discovered_host: str = ""
+        self._discovered_devices: list[dict[str, Any]] = []
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -83,18 +90,92 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            host = _normalize_host(user_input[CONF_HOST])
-            info, errors = await _try_validate(self.hass, host)
-            if info is not None:
-                await self.async_set_unique_id(_device_key(info, host))
-                # If this exact frame is already configured (e.g. someone
-                # re-runs "Add integration" after its IP changed), update
-                # the existing entry instead of erroring out.
-                self._abort_if_unique_id_configured(updates={CONF_HOST: host})
-                title = f"Fraimic ({host.replace('http://', '').replace('https://', '')})"
-                return self.async_create_entry(title=title, data={CONF_HOST: host})
+            raw_host = user_input[CONF_HOST].strip()
+            if not raw_host:
+                self._discovered_devices = await discovery.scan_subnet(self.hass)
+                if not self._discovered_devices:
+                    errors["base"] = "no_devices_found"
+                else:
+                    return await self.async_step_pick_device()
+            else:
+                host = normalize_host(raw_host)
+                info, errors = await _try_validate(self.hass, host)
+                if info is not None:
+                    await self.async_set_unique_id(_device_key(info, host))
+                    # If this exact frame is already configured (e.g. someone
+                    # re-runs "Add integration" after its IP changed), update
+                    # the existing entry instead of erroring out.
+                    self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+                    title = f"Fraimic ({host.replace('http://', '').replace('https://', '')})"
+                    return self.async_create_entry(title=title, data={CONF_HOST: host})
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors)
+
+    async def async_step_pick_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Let the user pick one of the devices found by scan_subnet."""
+        if user_input is not None:
+            picked_ip = user_input[CONF_HOST]
+            device = next(d for d in self._discovered_devices if d["ip"] == picked_ip)
+            host = normalize_host(picked_ip)
+            await self.async_set_unique_id(_device_key(device["info"], host))
+            self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+            title = f"Fraimic ({picked_ip})"
+            return self.async_create_entry(title=title, data={CONF_HOST: host})
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(
+                                value=d["ip"], label=f"{d['ip']} — {_model_of(d['info'])}"
+                            )
+                            for d in self._discovered_devices
+                        ]
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="pick_device", data_schema=schema)
+
+    async def async_step_dhcp(self, discovery_info: DhcpServiceInfo) -> ConfigFlowResult:
+        """Handle a Fraimic frame observed via DHCP.
+
+        Verified with a real /api/info probe before ever showing anything
+        to the user -- our manifest's MAC-OUI matcher (Espressif) is too
+        generic to trust alone. Also opportunistically self-heals an
+        already-configured entry's stored host (including normalizing a
+        previously fraimic.local-configured entry to a tracked IP)."""
+        session = async_get_clientsession(self.hass)
+        host = normalize_host(discovery_info.ip)
+        info = await discovery.probe_frame(session, host)
+        if info is None:
+            return self.async_abort(reason="not_fraimic_device")
+
+        await self.async_set_unique_id(_device_key(info, host))
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+        self._discovered_host = host
+        # Shows the detected model (instead of just "Fraimic") on the
+        # discovery card under Settings > Devices & Services, before the
+        # user ever opens the confirm form -- see strings.json's
+        # config.flow_title, which reads this same placeholder.
+        self.context["title_placeholders"] = {
+            "ip": discovery_info.ip,
+            "model": _model_of(info),
+        }
+        return self.async_show_form(
+            step_id="dhcp_confirm",
+            description_placeholders={"ip": discovery_info.ip, "model": _model_of(info)},
+        )
+
+    async def async_step_dhcp_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        title = f"Fraimic ({self._discovered_host.replace('http://', '')})"
+        return self.async_create_entry(title=title, data={CONF_HOST: self._discovered_host})
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -104,7 +185,7 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         reconfigure_entry = self._get_reconfigure_entry()
 
         if user_input is not None:
-            host = _normalize_host(user_input[CONF_HOST])
+            host = normalize_host(user_input[CONF_HOST])
             info, errors = await _try_validate(self.hass, host)
             if info is not None:
                 await self.async_set_unique_id(_device_key(info, host))

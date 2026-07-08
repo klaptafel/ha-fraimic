@@ -62,6 +62,7 @@ from .const import (
     SERVICE_SEND_IMAGE,
 )
 from .entity import FraimicEntity
+from .frame_types import frame_type_for_size
 from .image_converter import convert_image
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
 
@@ -259,6 +260,11 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
         device_orientation = self._entry.options.get(
             CONF_DEVICE_ORIENTATION, DEFAULT_DEVICE_ORIENTATION
         )
+        # Detected via the frame's own /info admin page (api.get_info_page,
+        # merged into the main coordinator's data) -- falls back to the
+        # 13.3" default if that best-effort scrape hasn't succeeded yet.
+        panel_size = (self._runtime.coordinator.data or {}).get("info_page", {}).get("panel_size")
+        frame_type = frame_type_for_size(panel_size)
 
         status = self._runtime.send_status
         self._attr_state = MediaPlayerState.BUFFERING
@@ -272,6 +278,8 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                     fit=fit,
                     device_orientation=device_orientation,
                     dither=dither,
+                    width=frame_type.width,
+                    height=frame_type.height,
                 )
             )
             if dry_run:

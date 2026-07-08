@@ -11,9 +11,12 @@ from homeassistant.helpers.entity_component import DATA_INSTANCES
 from PIL import Image
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.fraimic.const import CONF_HOST, DOMAIN, PANEL_BIN_SIZE
+from custom_components.fraimic.const import CONF_HOST, DOMAIN
+from custom_components.fraimic.frame_types import DEFAULT_FRAME_TYPE
 
 from .conftest import write_test_image
+
+PANEL_BIN_SIZE = DEFAULT_FRAME_TYPE.bin_size
 
 HOST = "http://1.2.3.4"
 INFO = {"device": {"device_key": "abc123"}}
@@ -308,6 +311,44 @@ async def test_send_image_unexpected_error_is_caught(
     entity = _get_entity(hass)
     assert entity.media_title == "Frame never woke up, gave up: photo.jpg"
     assert not entity._busy_lock.locked()
+
+
+async def test_convert_and_send_resolves_detected_panel_size(
+    hass: HomeAssistant, aioclient_mock, tmp_path, monkeypatch
+) -> None:
+    """/info reports a 31.5" panel -- _convert_and_send must resolve that
+    via frame_types.frame_type_for_size and pass its real dimensions to
+    convert_image, not silently keep using the 13.3" default."""
+    from custom_components.fraimic import media_player as media_player_module
+
+    aioclient_mock.get(
+        f"{HOST}/info",
+        text=(
+            "<div class='info-row'><span class='info-label'>Device Type</span>"
+            "<span class='info-value'>31.5\" E-Ink</span></div>"
+        ),
+    )
+
+    captured: dict = {}
+
+    def fake_convert_image(*args, **kwargs):
+        captured.update(kwargs)
+        return b"\x00" * 100, b"fake-png"
+
+    monkeypatch.setattr(media_player_module, "convert_image", fake_convert_image)
+
+    await _setup(hass, aioclient_mock)
+    aioclient_mock.post(f"{HOST}/api/image", json={})
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = write_test_image(tmp_path)
+
+    await hass.services.async_call(
+        DOMAIN, "send_image", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert captured["width"] == 2560
+    assert captured["height"] == 1440
 
 
 async def test_send_image_already_busy(hass: HomeAssistant, aioclient_mock, tmp_path) -> None:
