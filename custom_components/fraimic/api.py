@@ -19,7 +19,6 @@ import logging
 import re
 from typing import Any, Callable
 
-import async_timeout
 from aiohttp import ClientError, ClientSession
 
 from homeassistant.exceptions import HomeAssistantError
@@ -140,7 +139,7 @@ async def _request_json(
     error_parser: ErrorParser = _frame_error,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    async with async_timeout.timeout(request_timeout):
+    async with asyncio.timeout(request_timeout):
         async with session.request(method, url, **kwargs) as resp:
             try:
                 payload = await resp.json(content_type=None)
@@ -222,7 +221,7 @@ async def get_info_page(
     """
     result: dict[str, Any] = {}
     try:
-        async with async_timeout.timeout(request_timeout):
+        async with asyncio.timeout(request_timeout):
             async with session.get(f"{host}{EP_INFO_PAGE}") as resp:
                 if resp.status != 200:
                     return result

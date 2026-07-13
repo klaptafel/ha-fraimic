@@ -13,19 +13,22 @@ from disk directly (e.g. from an automation), bypassing the browser.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import urllib.parse
 from datetime import timedelta
 from typing import Any
 
-import async_timeout
-import voluptuous as vol
 from aiohttp import ClientError
 
 from homeassistant.components import media_source
 from homeassistant.components.media_player import MediaPlayerEntity
-from homeassistant.components.media_player.browse_media import BrowseMedia
+from homeassistant.components.media_player.browse_media import (
+    BrowseMedia,
+    SearchMedia,
+    SearchMediaQuery,
+)
 from homeassistant.components.media_player.const import (
     MediaClass,
     MediaPlayerEntityFeature,
@@ -35,7 +38,7 @@ from homeassistant.components.media_player.const import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv, entity_platform
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -44,10 +47,6 @@ from homeassistant.util import dt as dt_util
 
 from . import api
 from .const import (
-    ATTR_DITHER,
-    ATTR_DRY_RUN,
-    ATTR_FIT,
-    ATTR_PATH,
     CONF_DEFAULT_DITHER,
     CONF_DEFAULT_FIT,
     CONF_DEVICE_ORIENTATION,
@@ -56,10 +55,7 @@ from .const import (
     DEFAULT_DRY_RUN,
     DEFAULT_FIT,
     DEFAULT_TIMEOUT,
-    DITHER_MODES,
     DOMAIN,
-    FIT_MODES,
-    SERVICE_SEND_IMAGE,
 )
 from .entity import FraimicEntity
 from .frame_types import frame_type_for_size
@@ -76,18 +72,6 @@ _LOGGER = logging.getLogger(__name__)
 # once the first finishes, exactly the silent-backlog behavior the
 # busy-lock check exists to prevent (see the comment in _convert_and_send).
 PARALLEL_UPDATES = 0
-
-# Deliberately a plain dict, not vol.Schema(...) -- async_register_entity_service
-# inspects the schema's actual shape at runtime and rejects anything that
-# isn't a raw field dict as "a non entity service schema" (it merges in the
-# standard entity-service fields itself). The dict-vs-Any typing mismatch
-# this causes is a stub limitation, not a real type error.
-SEND_IMAGE_SCHEMA: dict[str | vol.Marker, Any] = {
-    vol.Required(ATTR_PATH): cv.string,
-    vol.Optional(ATTR_FIT, default=DEFAULT_FIT): vol.In(FIT_MODES),
-    vol.Optional(ATTR_DITHER, default=DEFAULT_DITHER): vol.In(DITHER_MODES),
-    vol.Optional(ATTR_DRY_RUN, default=DEFAULT_DRY_RUN): cv.boolean,
-}
 
 _MEDIA_SOURCE_PREFIX = "media-source://media_source/"
 
@@ -113,17 +97,21 @@ async def async_setup_entry(
     runtime = entry.runtime_data
     async_add_entities([FraimicMediaPlayer(runtime, entry)])
 
-    platform = entity_platform.async_get_current_platform()
-    platform.async_register_entity_service(
-        SERVICE_SEND_IMAGE, SEND_IMAGE_SCHEMA, "async_send_local_file"
-    )
+    # The fraimic.send_image *service* itself is registered once, from
+    # __init__.py's async_setup_entry, via service.async_register_platform_entity_service
+    # -- not here. That's the current recommended pattern for platform
+    # entity services (this used to be EntityPlatform.async_register_entity_service,
+    # called per-platform-setup like this function; see
+    # https://developers.home-assistant.io/blog/2025/09/25/entity-services-api-changes).
 
 
 class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
     """Represents the frame as a media player you can push images to."""
 
     _attr_supported_features = (
-        MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA
+        MediaPlayerEntityFeature.BROWSE_MEDIA
+        | MediaPlayerEntityFeature.PLAY_MEDIA
+        | MediaPlayerEntityFeature.SEARCH_MEDIA
     )
     _attr_media_content_type = MediaType.IMAGE
     _attr_translation_key = "display"
@@ -172,6 +160,39 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
             content_filter=lambda item: (
                 item.media_class == MediaClass.DIRECTORY
                 or (item.media_content_type or "").startswith("image/")
+            ),
+        )
+
+    async def async_search_media(self, query: SearchMediaQuery) -> SearchMedia:
+        """Search by file name within the folder the browser is scoped to.
+
+        media_source.async_search_media has no content_filter parameter
+        (unlike async_browse_media above) -- the equivalent is
+        media_filter_classes on the query itself, which the underlying
+        local media source actually respects. Overriding just that one
+        field (SearchMediaQuery is frozen, so dataclasses.replace rather
+        than mutation) enforces the same directories+images restriction as
+        browsing, regardless of what the caller passed in for it, while
+        leaving every other field (search_query, media_content_id, etc.)
+        untouched.
+
+        The helper itself (core PR #175485) is newer than the rest of this
+        feature and isn't in any stable HA release yet -- unlike the
+        SEARCH_MEDIA feature flag/SearchMedia types above, hacs.json's
+        minimum version can't guarantee it exists, so this checks at call
+        time and fails with a clear message instead of an AttributeError.
+        """
+        if not hasattr(media_source, "async_search_media"):
+            raise HomeAssistantError(
+                "Searching media sources requires a newer Home Assistant "
+                "version than you're running (media_source.async_search_media "
+                "is not available yet)."
+            )
+        return await media_source.async_search_media(
+            self.hass,
+            query.media_content_id,
+            dataclasses.replace(
+                query, media_filter_classes=[MediaClass.DIRECTORY, MediaClass.IMAGE]
             ),
         )
 
@@ -379,7 +400,7 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
             base = get_url(self.hass, allow_internal=True, allow_external=False)
             url = f"{base}{url}"
         session = async_get_clientsession(self.hass)
-        async with async_timeout.timeout(DEFAULT_TIMEOUT):
+        async with asyncio.timeout(DEFAULT_TIMEOUT):
             async with session.get(url) as resp:
                 resp.raise_for_status()
                 return await resp.read()
