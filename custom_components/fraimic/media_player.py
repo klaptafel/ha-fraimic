@@ -18,7 +18,7 @@ import logging
 import os
 import urllib.parse
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 from aiohttp import ClientError
 
@@ -188,11 +188,18 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                 "version than you're running (media_source.async_search_media "
                 "is not available yet)."
             )
-        return await media_source.async_search_media(
-            self.hass,
-            query.media_content_id,
-            dataclasses.replace(
-                query, media_filter_classes=[MediaClass.DIRECTORY, MediaClass.IMAGE]
+        # cast: media_source.async_search_media isn't in any stable release
+        # yet, so mypy has no stub for it and infers Any from the dynamic
+        # hasattr-guarded access above -- the hasattr check is the real
+        # safety net here, this cast just states the documented return type.
+        return cast(
+            SearchMedia,
+            await media_source.async_search_media(
+                self.hass,
+                query.media_content_id,
+                dataclasses.replace(
+                    query, media_filter_classes=[MediaClass.DIRECTORY, MediaClass.IMAGE]
+                ),
             ),
         )
 
