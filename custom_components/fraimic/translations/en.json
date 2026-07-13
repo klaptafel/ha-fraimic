@@ -110,6 +110,12 @@
       "message": "{entity_id} is not a Fraimic albums sensor."
     }
   },
+  "issues": {
+    "albums_sync_failing": {
+      "title": "Album sync has been failing",
+      "description": "The frame at {host} has been awake and reachable, but syncing albums from Fraimic's cloud has kept failing regardless. This isn't the frame's normal sleep behavior -- check that the frame has internet access (not just a connection to your local network), and that app.fraimic.com is reachable."
+    }
+  },
   "services": {
     "send_image": {
       "name": "Send image",

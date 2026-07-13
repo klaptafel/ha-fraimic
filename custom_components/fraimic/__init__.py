@@ -8,8 +8,9 @@ from typing import Any
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.const import Platform
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import service as service_helper
 
-from .const import CONF_HOST, DOMAIN
+from .const import CONF_HOST, DOMAIN, SEND_IMAGE_SCHEMA, SERVICE_SEND_IMAGE
 from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
 from .frame_types import device_model_name
 from .image_store import FraimicImageStore
@@ -52,7 +53,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
     # reachability. Plain async_refresh(), not async_config_entry_first_
     # refresh() -- this is optional and cloud-dependent, a hiccup here must
     # not raise ConfigEntryNotReady and take the whole entry down with it.
-    albums_coordinator = FraimicAlbumsCoordinator(hass, host, coordinator)
+    albums_coordinator = FraimicAlbumsCoordinator(hass, host, coordinator, entry.entry_id)
     await albums_coordinator.async_refresh()
 
     entry.runtime_data = FraimicRuntimeData(
@@ -91,6 +92,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
             device_reg.async_update_device(device_entry.id, **updates)
 
     entry.async_on_unload(coordinator.async_add_listener(_sync_device_info))
+
+    # Registered once here (not per media_player platform setup) via the
+    # current recommended helper -- guarded since async_setup_entry can run
+    # once per config entry (e.g. a second frame added later) and
+    # hass.services.async_register would otherwise just re-register the
+    # same service redundantly each time.
+    if not hass.services.has_service(DOMAIN, SERVICE_SEND_IMAGE):
+        service_helper.async_register_platform_entity_service(
+            hass,
+            DOMAIN,
+            SERVICE_SEND_IMAGE,
+            entity_domain=Platform.MEDIA_PLAYER,
+            func="async_send_local_file",
+            schema=SEND_IMAGE_SCHEMA,
+        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

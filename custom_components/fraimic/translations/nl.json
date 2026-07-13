@@ -110,6 +110,12 @@
       "message": "{entity_id} is geen Fraimic albums-sensor."
     }
   },
+  "issues": {
+    "albums_sync_failing": {
+      "title": "Albums synchroniseren mislukt",
+      "description": "Het frame op {host} is wakker en bereikbaar, maar het synchroniseren van albums vanuit Fraimic's cloud blijft mislukken. Dit is geen normaal slaapgedrag van het frame -- controleer of het frame internettoegang heeft (niet alleen een verbinding met je lokale netwerk), en of app.fraimic.com bereikbaar is."
+    }
+  },
   "services": {
     "send_image": {
       "name": "Afbeelding versturen",

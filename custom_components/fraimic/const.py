@@ -1,5 +1,10 @@
 """Constants for the Fraimic E-Ink Canvas integration."""
 from datetime import timedelta
+from typing import Any
+
+import voluptuous as vol
+
+from homeassistant.helpers import config_validation as cv
 
 DOMAIN = "fraimic"
 
@@ -64,6 +69,19 @@ DITHER_MODES = (
 # "fit" (CSS object-fit: contain): show the whole image, pad with black.
 # "fill" (CSS object-fit: cover): fill the frame, cropping overflow.
 FIT_MODES = ("fit", "fill")
+
+# Deliberately a plain dict, not vol.Schema(...) -- async_register_platform_entity_service
+# (like the older async_register_entity_service before it) inspects the schema's
+# actual shape at runtime and rejects anything that isn't a raw field dict as
+# "a non entity service schema" (it merges in the standard entity-service
+# fields itself). The dict-vs-Any typing mismatch this causes is a stub
+# limitation, not a real type error.
+SEND_IMAGE_SCHEMA: dict[str | vol.Marker, Any] = {
+    vol.Required(ATTR_PATH): cv.string,
+    vol.Optional(ATTR_FIT, default=DEFAULT_FIT): vol.In(FIT_MODES),
+    vol.Optional(ATTR_DITHER, default=DEFAULT_DITHER): vol.In(DITHER_MODES),
+    vol.Optional(ATTR_DRY_RUN, default=DEFAULT_DRY_RUN): cv.boolean,
+}
 
 # How the frame is physically mounted. The panel's native buffer is
 # ALWAYS 1200(w)x1600(h) -- that never changes, it's a hardware fact of

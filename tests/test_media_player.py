@@ -575,6 +575,59 @@ async def test_async_browse_media_delegates_to_media_source(
     assert captured["media_content_id"] == "media-source://media_source/local"
 
 
+async def test_async_search_media_delegates_to_media_source(
+    hass: HomeAssistant, aioclient_mock, monkeypatch
+) -> None:
+    from homeassistant.components.media_player.browse_media import SearchMediaQuery
+    from homeassistant.components.media_player.const import MediaClass
+
+    from custom_components.fraimic import media_player as media_player_module
+
+    await _setup(hass, aioclient_mock)
+    entity = _get_entity(hass)
+
+    captured = {}
+
+    async def fake_search_media(hass, media_content_id, query):
+        captured["media_content_id"] = media_content_id
+        captured["query"] = query
+        return "search-result"
+
+    monkeypatch.setattr(media_player_module.media_source, "async_search_media", fake_search_media)
+
+    result = await entity.async_search_media(
+        SearchMediaQuery(search_query="vacation", media_content_id="media-source://media_source/local")
+    )
+
+    assert result == "search-result"
+    assert captured["media_content_id"] == "media-source://media_source/local"
+    assert captured["query"].search_query == "vacation"
+    # Enforced server-side regardless of what the caller passed in --
+    # mirrors async_browse_media's own directories+images content_filter.
+    assert set(captured["query"].media_filter_classes) == {MediaClass.DIRECTORY, MediaClass.IMAGE}
+
+
+async def test_async_search_media_raises_clear_error_when_helper_unavailable(
+    hass: HomeAssistant, aioclient_mock, monkeypatch
+) -> None:
+    # media_source.async_search_media (core PR #175485) is newer than the
+    # rest of the search feature and isn't in any stable HA release yet --
+    # simulates running against a version that predates it.
+    from homeassistant.components.media_player.browse_media import SearchMediaQuery
+
+    from custom_components.fraimic import media_player as media_player_module
+
+    await _setup(hass, aioclient_mock)
+    entity = _get_entity(hass)
+
+    monkeypatch.delattr(media_player_module.media_source, "async_search_media", raising=False)
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_search_media(
+            SearchMediaQuery(search_query="vacation", media_content_id="media-source://media_source/local")
+        )
+
+
 async def test_media_player_stays_available_when_frame_unreachable(
     hass: HomeAssistant, aioclient_mock
 ) -> None:

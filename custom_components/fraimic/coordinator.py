@@ -25,6 +25,7 @@ from aiohttp import ClientError, ClientSession
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -72,21 +73,39 @@ class FraimicBaseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _mark_success(self) -> None:
         self._last_success = dt_util.utcnow()
 
+    def _log_reachability_change(self, was_reachable: bool) -> None:
+        """Log only the moment device_reachable actually flips, not every
+        individual missed poll -- keeps this quiet during the sleep gaps
+        it's specifically designed to tolerate, per the module docstring.
+        """
+        is_reachable = self.device_reachable
+        if was_reachable and not is_reachable:
+            _LOGGER.warning(
+                "%s: no contact with the frame at %s for over %s -- marking unreachable",
+                self.name, self.base_url, UNAVAILABLE_AFTER,
+            )
+        elif not was_reachable and is_reachable:
+            _LOGGER.info("%s: frame at %s is reachable again", self.name, self.base_url)
+
     async def _fetch(self, session: ClientSession) -> dict[str, Any]:
         raise NotImplementedError
 
     async def _async_update_data(self) -> dict[str, Any]:
-        session = async_get_clientsession(self.hass)
+        was_reachable = self.device_reachable
         try:
-            data = await self._fetch(session)
-        except HomeAssistantError as err:
-            raise UpdateFailed(str(err)) from err
-        except (ClientError, TimeoutError) as err:
-            raise UpdateFailed(
-                f"Could not connect to Fraimic frame at {self.base_url}: {err}"
-            ) from err
-        self._mark_success()
-        return data
+            session = async_get_clientsession(self.hass)
+            try:
+                data = await self._fetch(session)
+            except HomeAssistantError as err:
+                raise UpdateFailed(str(err)) from err
+            except (ClientError, TimeoutError) as err:
+                raise UpdateFailed(
+                    f"Could not connect to Fraimic frame at {self.base_url}: {err}"
+                ) from err
+            self._mark_success()
+            return data
+        finally:
+            self._log_reachability_change(was_reachable)
 
 
 class FraimicCoordinator(FraimicBaseCoordinator):
@@ -127,9 +146,12 @@ class FraimicAlbumsCoordinator(FraimicBaseCoordinator):
     correctness requirement (a real attempt would fail the same way).
     """
 
-    def __init__(self, hass: HomeAssistant, host: str, main_coordinator: FraimicCoordinator) -> None:
+    def __init__(
+        self, hass: HomeAssistant, host: str, main_coordinator: FraimicCoordinator, entry_id: str
+    ) -> None:
         super().__init__(hass, host, f"{DOMAIN}_albums", DEFAULT_ALBUMS_SCAN_INTERVAL)
         self._main_coordinator = main_coordinator
+        self._issue_id = f"albums_sync_failing_{entry_id}"
 
     async def _fetch(self, session: ClientSession) -> dict[str, Any]:
         if not self._main_coordinator.device_reachable:
@@ -138,3 +160,25 @@ class FraimicAlbumsCoordinator(FraimicBaseCoordinator):
             # not raising UpdateFailed directly here, for consistency.
             raise HomeAssistantError("Frame not reachable -- skipping albums fetch")
         return await api.get_albums(session, self.base_url)
+
+    def _log_reachability_change(self, was_reachable: bool) -> None:
+        super()._log_reachability_change(was_reachable)
+        # A repair issue here needs a signal that can't just be explained by
+        # the frame being asleep (which is normal, expected, and frequent --
+        # see the module docstring). Gating on the *main* coordinator's own
+        # device_reachable, not this one's, is what makes that distinction:
+        # this only fires while the frame itself is demonstrably awake and
+        # answering, yet album sync specifically keeps failing -- pointing
+        # at the cloud-proxied endpoint itself, not the frame's sleep cycle.
+        if not self.device_reachable and self._main_coordinator.device_reachable:
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                self._issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="albums_sync_failing",
+                translation_placeholders={"host": self.base_url},
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)

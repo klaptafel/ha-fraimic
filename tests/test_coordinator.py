@@ -6,9 +6,10 @@ from datetime import timedelta
 import aiohttp
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from custom_components.fraimic.const import UNAVAILABLE_AFTER
+from custom_components.fraimic.const import DOMAIN, UNAVAILABLE_AFTER
 from custom_components.fraimic.coordinator import (
     FraimicAlbumsCoordinator,
     FraimicBatteryCoordinator,
@@ -130,7 +131,7 @@ async def test_albums_coordinator_success(hass: HomeAssistant, aioclient_mock) -
     main = FraimicCoordinator(hass, HOST)
     await main.async_refresh()
 
-    albums = FraimicAlbumsCoordinator(hass, HOST, main)
+    albums = FraimicAlbumsCoordinator(hass, HOST, main, "test_entry_id")
     await albums.async_refresh()
 
     assert albums.last_update_success is True
@@ -144,7 +145,7 @@ async def test_albums_coordinator_skips_fetch_when_main_unreachable(
     gate failed and a real request fired, the unmocked URL itself would
     error, which is a stronger assertion than just checking a status flag."""
     main = FraimicCoordinator(hass, HOST)  # never refreshed -- device_reachable is False
-    albums = FraimicAlbumsCoordinator(hass, HOST, main)
+    albums = FraimicAlbumsCoordinator(hass, HOST, main, "test_entry_id")
 
     await albums.async_refresh()
 
@@ -162,7 +163,7 @@ async def test_albums_coordinator_gate_reopens_once_main_reachable(
     aioclient_mock.get(f"{HOST}/api/info", json={"device": {"device_key": "abc"}})
     aioclient_mock.get(f"{HOST}/api/albums", json={"albums": []})
     main = FraimicCoordinator(hass, HOST)
-    albums = FraimicAlbumsCoordinator(hass, HOST, main)
+    albums = FraimicAlbumsCoordinator(hass, HOST, main, "test_entry_id")
 
     await albums.async_refresh()
     assert albums.last_update_success is False
@@ -170,3 +171,60 @@ async def test_albums_coordinator_gate_reopens_once_main_reachable(
     await main.async_refresh()
     await albums.async_refresh()
     assert albums.last_update_success is True
+
+
+async def test_reachability_change_logs_only_on_transition(
+    hass: HomeAssistant, aioclient_mock, caplog
+) -> None:
+    aioclient_mock.get(f"{HOST}/api/info", json={})
+    coordinator = FraimicCoordinator(hass, HOST)
+    await coordinator.async_refresh()
+
+    with caplog.at_level("INFO", logger="custom_components.fraimic.coordinator"):
+        # Not yet expired -- no log expected.
+        coordinator._log_reachability_change(was_reachable=True)
+        assert "unreachable" not in caplog.text
+
+        # Simulate crossing the unreachable threshold, then report the
+        # transition exactly as _async_update_data's finally block would.
+        coordinator._last_success = dt_util.utcnow() - (UNAVAILABLE_AFTER + timedelta(minutes=1))
+        coordinator._log_reachability_change(was_reachable=True)
+        assert "unreachable" in caplog.text
+
+        caplog.clear()
+        coordinator._mark_success()
+        coordinator._log_reachability_change(was_reachable=False)
+        assert "reachable again" in caplog.text
+
+
+async def test_albums_repair_issue_not_created_while_main_asleep(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """The main frame being asleep is normal and frequent -- see the module
+    docstring -- so a repair issue must never fire from that alone, only
+    from albums failing *while the frame is otherwise reachable*."""
+    main = FraimicCoordinator(hass, HOST)  # never refreshed -- asleep
+    albums = FraimicAlbumsCoordinator(hass, HOST, main, "test_entry_id")
+
+    await albums.async_refresh()
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, "albums_sync_failing_test_entry_id") is None
+
+
+async def test_albums_repair_issue_created_and_cleared(hass: HomeAssistant, aioclient_mock) -> None:
+    aioclient_mock.get(f"{HOST}/api/info", json={"device": {"device_key": "abc"}})
+    main = FraimicCoordinator(hass, HOST)
+    await main.async_refresh()
+
+    # /api/albums intentionally unmocked -- main is reachable but album
+    # sync itself keeps failing, the one case that should raise the issue.
+    albums = FraimicAlbumsCoordinator(hass, HOST, main, "test_entry_id")
+    await albums.async_refresh()
+
+    issue_id = "albums_sync_failing_test_entry_id"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+    aioclient_mock.get(f"{HOST}/api/albums", json={"albums": []})
+    await albums.async_refresh()
+
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
