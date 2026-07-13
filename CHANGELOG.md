@@ -2,9 +2,9 @@
 
 All notable changes to this project are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Versions before 1.0.0 are not retroactively documented. See git history / GitHub releases for those.
 
-## [Unreleased]
+## [1.1.0] - 2026-07-13
 
-Fixes a bug that could stop images from sending once Home Assistant itself moves to a newer Python version. Behind the scenes, the integration now logs when the frame's reachability actually changes rather than on every missed check while it's asleep, and raises a self-healing notification if album syncing keeps failing while the frame is clearly awake. The README also gained a proper explanation of how updates work, plus troubleshooting and known-limitations sections.
+Raises a self-healing notification if album syncing keeps failing while the frame is clearly awake, and now only logs when the frame's reachability actually changes rather than on every missed check while it's asleep. The README also gained a proper explanation of how updates work, plus troubleshooting and known-limitations sections. Also includes a precautionary fix for a bug that could have stopped images from sending once Home Assistant itself moves to a newer Python version.
 
 ### Added
 - README: badges, a Features section (listing entities/services), Supported devices, Removal, "How updates work" (polling model + deep-sleep-tolerant availability explained), an example automation, Troubleshooting, and Known limitations sections, brought in line with this HACS collection's other projects' README structure.
