@@ -13,22 +13,17 @@ from disk directly (e.g. from an automation), bypassing the browser.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import logging
 import os
 import urllib.parse
 from datetime import timedelta
-from typing import Any, cast
+from typing import Any
 
 from aiohttp import ClientError
 
 from homeassistant.components import media_source
 from homeassistant.components.media_player import MediaPlayerEntity
-from homeassistant.components.media_player.browse_media import (
-    BrowseMedia,
-    SearchMedia,
-    SearchMediaQuery,
-)
+from homeassistant.components.media_player.browse_media import BrowseMedia
 from homeassistant.components.media_player.const import (
     MediaClass,
     MediaPlayerEntityFeature,
@@ -109,9 +104,7 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
     """Represents the frame as a media player you can push images to."""
 
     _attr_supported_features = (
-        MediaPlayerEntityFeature.BROWSE_MEDIA
-        | MediaPlayerEntityFeature.PLAY_MEDIA
-        | MediaPlayerEntityFeature.SEARCH_MEDIA
+        MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA
     )
     _attr_media_content_type = MediaType.IMAGE
     _attr_translation_key = "display"
@@ -160,46 +153,6 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
             content_filter=lambda item: (
                 item.media_class == MediaClass.DIRECTORY
                 or (item.media_content_type or "").startswith("image/")
-            ),
-        )
-
-    async def async_search_media(self, query: SearchMediaQuery) -> SearchMedia:
-        """Search by file name within the folder the browser is scoped to.
-
-        media_source.async_search_media has no content_filter parameter
-        (unlike async_browse_media above) -- the equivalent is
-        media_filter_classes on the query itself, which the underlying
-        local media source actually respects. Overriding just that one
-        field (SearchMediaQuery is frozen, so dataclasses.replace rather
-        than mutation) enforces the same directories+images restriction as
-        browsing, regardless of what the caller passed in for it, while
-        leaving every other field (search_query, media_content_id, etc.)
-        untouched.
-
-        The helper itself (core PR #175485) is newer than the rest of this
-        feature and isn't in any stable HA release yet -- unlike the
-        SEARCH_MEDIA feature flag/SearchMedia types above, hacs.json's
-        minimum version can't guarantee it exists, so this checks at call
-        time and fails with a clear message instead of an AttributeError.
-        """
-        if not hasattr(media_source, "async_search_media"):
-            raise HomeAssistantError(
-                "Searching media sources requires a newer Home Assistant "
-                "version than you're running (media_source.async_search_media "
-                "is not available yet)."
-            )
-        # cast: media_source.async_search_media isn't in any stable release
-        # yet, so mypy has no stub for it and infers Any from the dynamic
-        # hasattr-guarded access above -- the hasattr check is the real
-        # safety net here, this cast just states the documented return type.
-        return cast(
-            SearchMedia,
-            await media_source.async_search_media(
-                self.hass,
-                query.media_content_id,
-                dataclasses.replace(
-                    query, media_filter_classes=[MediaClass.DIRECTORY, MediaClass.IMAGE]
-                ),
             ),
         )
 
