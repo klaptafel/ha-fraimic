@@ -593,7 +593,9 @@ async def test_async_search_media_delegates_to_media_source(
         captured["query"] = query
         return "search-result"
 
-    monkeypatch.setattr(media_player_module.media_source, "async_search_media", fake_search_media)
+    monkeypatch.setattr(
+        media_player_module.media_source, "async_search_media", fake_search_media, raising=False
+    )
 
     result = await entity.async_search_media(
         SearchMediaQuery(search_query="vacation", media_content_id="media-source://media_source/local")
