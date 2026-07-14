@@ -34,21 +34,17 @@ def dig_path(data: dict[str, Any], path: tuple[str, ...]) -> Any:
     return value
 
 
-def device_identity_base(entry: ConfigEntry, base_url: str) -> dict[str, Any]:
+def device_info(entry: ConfigEntry, base_url: str) -> DeviceInfo:
     """The device-identity fields shared by every entity's DeviceInfo *and*
     __init__.py's explicit device_reg.async_get_or_create() call (which adds
     model/sw_version on top, since those are only known once the coordinator
     has data). Kept in one place so the two never drift apart."""
-    return {
-        "identifiers": {(DOMAIN, device_key(entry))},
-        "name": "Fraimic E-Ink Canvas",
-        "manufacturer": "Fraimic",
-        "configuration_url": base_url,
-    }
-
-
-def device_info(entry: ConfigEntry, base_url: str) -> DeviceInfo:
-    return DeviceInfo(**device_identity_base(entry, base_url))
+    return DeviceInfo(
+        identifiers={(DOMAIN, device_key(entry))},
+        name="Fraimic E-Ink Canvas",
+        manufacturer="Fraimic",
+        configuration_url=base_url,
+    )
 
 
 class FraimicEntity(CoordinatorEntity[FraimicBaseCoordinator]):

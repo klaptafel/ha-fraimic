@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import io
 import logging
+from typing import Any
 
 import epaper_dithering as _epaper_dithering
 import numpy as np
@@ -66,7 +67,7 @@ _CODE_FOR_PALETTE_INDEX = [0x0, 0x1, 0x2, 0x3, 0x5, 0x6]
 # 6 codes that are real palette entries; _VALID_CHANNEL_CODE flags which
 # codes those are, so the (should-never-happen) fallback path below still
 # runs for cyan/magenta codes instead of silently mapping them to index 0.
-def _build_channel_code_luts() -> tuple[np.ndarray, np.ndarray]:
+def _build_channel_code_luts() -> tuple[np.ndarray[Any, np.dtype[np.uint8]], np.ndarray[Any, np.dtype[np.bool_]]]:
     index_for_code = np.zeros(8, dtype=np.uint8)
     valid_code = np.zeros(8, dtype=bool)
     for idx, (r, g, b) in enumerate(_PALETTE_RGB):
@@ -219,8 +220,8 @@ def _pack_bin(indices: bytes | bytearray, width: int, height: int) -> bytes:
     codes = _CODE_LUT[idx]
     left_half, right_half = codes[:, 0 : width // 2], codes[:, width // 2 : width]
 
-    def _pack_half(half: np.ndarray) -> bytes:
-        return ((half[:, 0::2] << 4) | half[:, 1::2]).astype(np.uint8).tobytes()
+    def _pack_half(half: np.ndarray[Any, np.dtype[np.uint8]]) -> bytes:
+        return bytes(((half[:, 0::2] << 4) | half[:, 1::2]).astype(np.uint8).tobytes())
 
     return _pack_half(left_half) + _pack_half(right_half)
 

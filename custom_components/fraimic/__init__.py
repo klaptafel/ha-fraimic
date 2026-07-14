@@ -12,7 +12,7 @@ from homeassistant.helpers import service as service_helper
 
 from .const import CONF_HOST, DOMAIN, SEND_IMAGE_SCHEMA, SERVICE_SEND_IMAGE
 from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
-from .entity import device_identity_base
+from .entity import device_info
 from .frame_types import device_model_from_info
 from .image_store import FraimicImageStore
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData
@@ -63,7 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
     device_reg = dr.async_get(hass)
     device_entry = device_reg.async_get_or_create(
         config_entry_id=entry.entry_id,
-        **device_identity_base(entry, coordinator.base_url),
+        **device_info(entry, coordinator.base_url),
         model=device_model_from_info(coordinator.data or {}),
         sw_version=(coordinator.data or {}).get("firmware_version"),
     )
