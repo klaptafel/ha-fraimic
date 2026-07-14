@@ -13,14 +13,14 @@ rules:
     status: done
     comment: >
       Since HA 2026.3 (Brands Proxy API), a local brand/ folder is the
-      current standard — the home-assistant/brands repo now calls its
+      current standard; the home-assistant/brands repo now calls its
       custom_integrations/ folder "legacy". icon.png/icon@2x.png are
       present, meeting the required/recommended minimum. logo.png/
-      logo@2x.png are missing but optional — see brand/README.md.
+      logo@2x.png are missing but optional, see brand/README.md.
   common-modules: done
   config-flow-test-coverage:
     status: done
-    comment: tests/test_config_flow.py — 16 test functions covering user/dhcp/reconfigure/pick_device flows.
+    comment: tests/test_config_flow.py, 16 test functions covering user/dhcp/reconfigure/pick_device flows.
   dependency-transparency: done
   docs-actions: done
   docs-high-level-description: done
@@ -28,11 +28,11 @@ rules:
   docs-removal-instructions: done
   entity-event-setup:
     status: done
-    comment: All entities are CoordinatorEntity subclasses — listener setup/teardown is handled by the coordinator base class.
+    comment: All entities are CoordinatorEntity subclasses; listener setup/teardown is handled by the coordinator base class.
   entity-unique-id: done
   has-entity-name:
     status: done
-    comment: Set once on the shared FraimicEntity base class (entity.py) — every platform inherits it.
+    comment: Set once on the shared FraimicEntity base class (entity.py); every platform inherits it.
   runtime-data:
     status: done
     comment: FraimicRuntimeData bundle stored on entry.runtime_data (runtime_data.py), not hass.data.
@@ -41,7 +41,7 @@ rules:
     comment: _try_validate probes the host with a real /api/info request before the entry is created, in both async_step_user and async_step_reconfigure.
   test-before-setup:
     status: done
-    comment: async_config_entry_first_refresh() on both required coordinators — raises ConfigEntryNotReady on failure.
+    comment: async_config_entry_first_refresh() on both required coordinators; raises ConfigEntryNotReady on failure.
   unique-config-entry:
     status: done
     comment: async_set_unique_id + _abort_if_unique_id_configured across user/pick_device/dhcp flows, keyed on the frame's own device_key.
@@ -49,12 +49,12 @@ rules:
   # Silver
   action-exceptions:
     status: done
-    comment: send_image/update_album raise HomeAssistantError with translation_key on failure (bad path, busy frame, unknown album, etc.) — never silently no-op.
+    comment: send_image/update_album raise HomeAssistantError with translation_key on failure (bad path, busy frame, unknown album, etc.); never silently no-op.
   config-entry-unloading: done
   docs-configuration-parameters: done
   docs-installation-parameters:
     status: exempt
-    comment: Installation needs no parameters — the frame is discovered automatically or the user types its address; nothing else to configure at install time.
+    comment: Installation needs no parameters, the frame is discovered automatically or the user types its address; nothing else to configure at install time.
   entity-unavailable:
     status: done
     comment: >
@@ -73,11 +73,11 @@ rules:
     status: done
     comment: >
       Declared per-platform (sensor.py/binary_sensor.py at 0, button.py at
-      1, media_player.py at 0 — deliberately, see the comment there about
+      1, media_player.py at 0, deliberately; see the comment there about
       not blocking the caller on image upload).
   reauthentication-flow:
     status: exempt
-    comment: No user authentication — the frame is a local device with no login (device_key is only used for the cloud-proxied albums endpoint, not a user credential).
+    comment: No user authentication, the frame is a local device with no login (device_key is only used for the cloud-proxied albums endpoint, not a user credential).
   test-coverage:
     status: done
     comment: CI enforces --cov-fail-under=95 across every module (test.yml), 15 test files covering all platforms plus api/coordinator/discovery/image handling.
@@ -116,11 +116,11 @@ rules:
   docs-use-cases: done
   dynamic-devices:
     status: exempt
-    comment: One device per config entry (one frame = one entry) — a second frame is added as a separate config entry, not dynamically discovered within an existing one.
+    comment: One device per config entry (one frame = one entry); a second frame is added as a separate config entry, not dynamically discovered within an existing one.
   entity-category: done
   entity-device-class:
     status: done
-    comment: Applied where a standard class fits (BATTERY, VOLTAGE, SIGNAL_STRENGTH, TIMESTAMP) — not forced onto sensors like Albums/Send Status that have no matching standard class.
+    comment: Applied where a standard class fits (BATTERY, VOLTAGE, SIGNAL_STRENGTH, TIMESTAMP); not forced onto sensors like Albums/Send Status that have no matching standard class.
   entity-disabled-by-default:
     status: done
     comment: Voltage and WiFi RSSI sensors default disabled (entity_registry_enabled_default=False) as secondary/noisy diagnostics; the primary battery-percent/reachability entities stay enabled.
@@ -128,7 +128,7 @@ rules:
   exception-translations:
     status: done
     comment: >
-      Extensive — every HomeAssistantError raised across api.py/
+      Extensive: every HomeAssistantError raised across api.py/
       media_player.py/sensor.py/button.py uses translation_key with
       matching entries in strings.json's exceptions section, not raw
       f-strings.
@@ -140,26 +140,26 @@ rules:
     status: done
     comment: >
       A repair issue is raised when album sync keeps failing while the
-      main frame is demonstrably reachable — deliberately gated on the
+      main frame is demonstrably reachable; deliberately gated on the
       *main* coordinator's device_reachable, not the albums coordinator's
-      own, so ordinary deep-sleep gaps (frequent and expected — see the
+      own, so ordinary deep-sleep gaps (frequent and expected, see the
       module docstring) can never trigger it, only a genuine problem with
       the cloud-proxied endpoint itself while the frame is awake.
   stale-devices:
     status: exempt
-    comment: One device per config entry — removing the entry removes the device via HA's own registry cleanup; nothing to individually track as stale.
+    comment: One device per config entry, removing the entry removes the device via HA's own registry cleanup; nothing to individually track as stale.
 
   # Platinum
   async-dependency:
     status: exempt
     comment: >
       requirements.txt/manifest.json only list Pillow and
-      epaper-dithering — pure image-processing libraries, not network
+      epaper-dithering: pure image-processing libraries, not network
       clients with their own async/sync distinction to worry about. All
       actual HTTP calls go through aiohttp via HA's shared clientsession.
   inject-websession:
     status: done
-    comment: All coordinators/discovery/config_flow calls take the session via async_get_clientsession(hass) — no integration-owned session is created.
+    comment: All coordinators/discovery/config_flow calls take the session via async_get_clientsession(hass); no integration-owned session is created.
   strict-typing:
     status: done
     comment: mypy.ini sets strict = true, enforced in CI (test.yml's mypy job) alongside the 95% coverage gate.

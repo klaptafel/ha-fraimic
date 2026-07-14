@@ -34,7 +34,7 @@ from .const import (
     DOMAIN,
     FIT_MODES,
 )
-from .frame_types import device_model_name
+from .frame_types import device_model_from_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,12 +67,9 @@ def _device_key(info: dict[str, Any], fallback_host: str) -> str:
     return key or fallback_host
 
 
-def _model_of(info: dict[str, Any]) -> str:
-    """The same model string shown on the device page, but derived from a
-    discovery probe's result (see discovery.probe_frame) instead of a
-    running coordinator -- so the model can be shown before the entry
-    even exists yet."""
-    return device_model_name((info.get("info_page") or {}).get("panel_size"))
+def _display_host(host: str) -> str:
+    """Strip a scheme prefix for display in a config-entry title."""
+    return host.replace("http://", "").replace("https://", "")
 
 
 class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -106,7 +103,7 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     # re-runs "Add integration" after its IP changed), update
                     # the existing entry instead of erroring out.
                     self._abort_if_unique_id_configured(updates={CONF_HOST: host})
-                    title = f"Fraimic ({host.replace('http://', '').replace('https://', '')})"
+                    title = f"Fraimic ({_display_host(host)})"
                     return self.async_create_entry(title=title, data={CONF_HOST: host})
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors)
@@ -130,7 +127,7 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     SelectSelectorConfig(
                         options=[
                             SelectOptionDict(
-                                value=d["ip"], label=f"{d['ip']} — {_model_of(d['info'])}"
+                                value=d["ip"], label=f"{d['ip']}: {device_model_from_info(d['info'])}"
                             )
                             for d in self._discovered_devices
                         ]
@@ -164,17 +161,17 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # config.flow_title, which reads this same placeholder.
         self.context["title_placeholders"] = {
             "ip": discovery_info.ip,
-            "model": _model_of(info),
+            "model": device_model_from_info(info),
         }
         return self.async_show_form(
             step_id="dhcp_confirm",
-            description_placeholders={"ip": discovery_info.ip, "model": _model_of(info)},
+            description_placeholders={"ip": discovery_info.ip, "model": device_model_from_info(info)},
         )
 
     async def async_step_dhcp_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        title = f"Fraimic ({self._discovered_host.replace('http://', '')})"
+        title = f"Fraimic ({_display_host(self._discovered_host)})"
         return self.async_create_entry(title=title, data={CONF_HOST: self._discovered_host})
 
     async def async_step_reconfigure(

@@ -20,7 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FraimicBatteryCoordinator, FraimicCoordinator
-from .entity import FraimicEntity
+from .entity import FraimicEntity, dig_path
 from .runtime_data import FraimicConfigEntry
 
 # All state comes from the coordinators' shared poll, not per-entity I/O,
@@ -125,15 +125,10 @@ class FraimicInfoBinarySensor(FraimicEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
-        value: Any = self.coordinator.data or {}
-        for key in self._path:
-            if not isinstance(value, dict):
-                return None
-            value = value.get(key)
         # value's shape is only known at runtime (raw JSON from /api/info) --
         # the path this class is constructed with is what actually guarantees
         # it's a bool, not something mypy can see from here.
-        return cast("bool | None", value)
+        return cast("bool | None", dig_path(self.coordinator.data or {}, self._path))
 
 
 class FraimicReachableBinarySensor(FraimicEntity, BinarySensorEntity):

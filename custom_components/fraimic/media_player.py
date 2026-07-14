@@ -53,7 +53,7 @@ from .const import (
     DOMAIN,
 )
 from .entity import FraimicEntity
-from .frame_types import frame_type_for_size
+from .frame_types import frame_type_for_size, panel_size_from_info
 from .image_converter import convert_image
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
 
@@ -233,26 +233,35 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
     ) -> None:
         """Runs as a background task -- _busy_lock is already held by the
         caller (_queue_send) and is released here, regardless of outcome."""
-        # device_orientation isn't caller-supplied -- it's a fact about
-        # how the frame is physically mounted, not something that varies
-        # per image, so it always comes straight from Options rather than
-        # being threaded through both async_play_media and
-        # async_send_local_file.
-        device_orientation = self._entry.options.get(
-            CONF_DEVICE_ORIENTATION, DEFAULT_DEVICE_ORIENTATION
-        )
-        # Detected via the frame's own /info admin page (api.get_info_page,
-        # merged into the main coordinator's data) -- falls back to the
-        # 13.3" default if that best-effort scrape hasn't succeeded yet.
-        panel_size = (self._runtime.coordinator.data or {}).get("info_page", {}).get("panel_size")
-        frame_type = frame_type_for_size(panel_size)
-
+        # status is read in the except/finally blocks below, so it's
+        # assigned before the try (not inside it) -- otherwise a failure in
+        # the try's own setup code, before this line runs, would leave
+        # `status` unbound and turn the finally block's cleanup itself into
+        # an UnboundLocalError instead of releasing _busy_lock.
         status = self._runtime.send_status
-        self._attr_state = MediaPlayerState.BUFFERING
-        status.sending = _display_name(source)
-        status.send_failed = None
-        self._notify_send_status_changed()
+        # Wrapped in the same try/finally as the conversion/upload below
+        # (not just that part) so a failure in this setup code still
+        # reaches the finally block and releases _busy_lock -- otherwise
+        # every later send would fail with "already busy" until reload.
         try:
+            # device_orientation isn't caller-supplied -- it's a fact about
+            # how the frame is physically mounted, not something that varies
+            # per image, so it always comes straight from Options rather than
+            # being threaded through both async_play_media and
+            # async_send_local_file.
+            device_orientation = self._entry.options.get(
+                CONF_DEVICE_ORIENTATION, DEFAULT_DEVICE_ORIENTATION
+            )
+            # Detected via the frame's own /info admin page (api.get_info_page,
+            # merged into the main coordinator's data) -- falls back to the
+            # 13.3" default if that best-effort scrape hasn't succeeded yet.
+            panel_size = panel_size_from_info(self._runtime.coordinator.data or {})
+            frame_type = frame_type_for_size(panel_size)
+
+            self._attr_state = MediaPlayerState.BUFFERING
+            status.sending = _display_name(source)
+            status.send_failed = None
+            self._notify_send_status_changed()
             bin_data, preview_png = await self.hass.async_add_executor_job(
                 lambda: convert_image(
                     raw_bytes,

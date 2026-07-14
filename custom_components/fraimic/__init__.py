@@ -12,9 +12,10 @@ from homeassistant.helpers import service as service_helper
 
 from .const import CONF_HOST, DOMAIN, SEND_IMAGE_SCHEMA, SERVICE_SEND_IMAGE
 from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
-from .frame_types import device_model_name
+from .entity import device_identity_base
+from .frame_types import device_model_from_info
 from .image_store import FraimicImageStore
-from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, device_key
+from .runtime_data import FraimicConfigEntry, FraimicRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,14 +25,6 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,
     Platform.MEDIA_PLAYER,
 ]
-
-
-def _device_model(data: dict[str, Any]) -> str:
-    """Panel size (13.3" vs 31.5") isn't in /api/info's JSON at all -- see
-    api.get_info_page for where it actually comes from (best-effort HTML
-    scrape). Falls back to a generic model string if that scrape hasn't
-    succeeded yet (e.g. right after a fresh restart)."""
-    return device_model_name((data.get("info_page") or {}).get("panel_size"))
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> bool:
@@ -70,12 +63,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
     device_reg = dr.async_get(hass)
     device_entry = device_reg.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, device_key(entry))},
-        name="Fraimic E-Ink Canvas",
-        manufacturer="Fraimic",
-        model=_device_model(coordinator.data or {}),
+        **device_identity_base(entry, coordinator.base_url),
+        model=device_model_from_info(coordinator.data or {}),
         sw_version=(coordinator.data or {}).get("firmware_version"),
-        configuration_url=coordinator.base_url,
     )
 
     @callback
@@ -85,7 +75,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
         fw = data.get("firmware_version")
         if fw and device_entry.sw_version != fw:
             updates["sw_version"] = fw
-        model = _device_model(data)
+        model = device_model_from_info(data)
         if device_entry.model != model:
             updates["model"] = model
         if updates:

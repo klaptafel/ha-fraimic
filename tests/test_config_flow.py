@@ -205,7 +205,7 @@ async def test_user_step_blank_host_pick_device_shows_detected_model(
 
     options = result["data_schema"].schema[CONF_HOST].config["options"]
     assert options == [
-        {"value": "192.168.1.10", "label": '192.168.1.10 — E-Ink Canvas 13.3" (Spectra 6)'}
+        {"value": "192.168.1.10", "label": '192.168.1.10: E-Ink Canvas 13.3" (Spectra 6)'}
     ]
 
 

@@ -67,17 +67,19 @@ _UPLOAD_RETRY_DELAYS = (2, 5)  # seconds to wait before attempt 2 and 3
 # capturing garbage) for any row shaped differently than expected.
 _PANEL_SIZE_INCHES_RE = re.compile(r'([\d.]+)\s*"')
 _LEADING_INT_RE = re.compile(r"(-?\d+)")
+_INFO_ROW_RE = re.compile(
+    r"<span class='info-label'>([^<]*)</span>\s*"
+    r"<span class='info-value'>([^<]*)</span>"
+)
 
 
-def _info_page_value(html: str, label: str) -> str | None:
-    """Extract one /info row's plain-text value by its label, e.g.
-    label="Cycles" -> "0". See get_info_page for why this exists."""
-    match = re.search(
-        rf"<span class='info-label'>{re.escape(label)}</span>\s*"
-        rf"<span class='info-value'>([^<]*)</span>",
-        html,
-    )
-    return match.group(1).strip() if match else None
+def _info_page_values(html: str) -> dict[str, str]:
+    """Extract every /info row's label -> plain-text value in a single pass
+    over the HTML, e.g. "Cycles" -> "0". See get_info_page for why this
+    exists. Rows whose value isn't a bare [^<]* span (like the badge-wrapped
+    "Registration"/"Time Sync" ones) simply don't produce a match here --
+    harmless, since get_info_page never looks those labels up."""
+    return {label.strip(): value.strip() for label, value in _INFO_ROW_RE.findall(html)}
 
 ErrorParser = Callable[[dict[str, Any], int], "HomeAssistantError | None"]
 
@@ -229,7 +231,9 @@ async def get_info_page(
     except Exception:  # noqa: BLE001
         return result
 
-    device_type = _info_page_value(html, "Device Type")
+    values = _info_page_values(html)
+
+    device_type = values.get("Device Type")
     if device_type:
         size_match = _PANEL_SIZE_INCHES_RE.search(device_type)
         if size_match:
@@ -241,7 +245,7 @@ async def get_info_page(
         ("battery_current_ma", "Current"),
         ("battery_temperature_c", "Temperature"),
     ):
-        value = _info_page_value(html, label)
+        value = values.get(label)
         if value is None:
             continue
         int_match = _LEADING_INT_RE.match(value)

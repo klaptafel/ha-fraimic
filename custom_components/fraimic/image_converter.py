@@ -42,6 +42,7 @@ import io
 import logging
 
 import epaper_dithering as _epaper_dithering
+import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,7 +57,27 @@ _PALETTE_RGB = [
     (0, 255, 0),      # 0x6 green
 ]
 _CODE_FOR_PALETTE_INDEX = [0x0, 0x1, 0x2, 0x3, 0x5, 0x6]
-_RGB_TO_INDEX = {rgb: i for i, rgb in enumerate(_PALETTE_RGB)}
+
+# Every _PALETTE_RGB entry has each of its R/G/B channels at exactly 0 or
+# 255, so it can be identified by a 3-bit "which channels are lit" code
+# (R<<2 | G<<1 | B) instead of a full RGB comparison. Two of the 8 possible
+# codes (011=cyan, 101=magenta) aren't used by any real palette entry.
+# _INDEX_FOR_CHANNEL_CODE maps a code straight to its palette index for the
+# 6 codes that are real palette entries; _VALID_CHANNEL_CODE flags which
+# codes those are, so the (should-never-happen) fallback path below still
+# runs for cyan/magenta codes instead of silently mapping them to index 0.
+def _build_channel_code_luts() -> tuple[np.ndarray, np.ndarray]:
+    index_for_code = np.zeros(8, dtype=np.uint8)
+    valid_code = np.zeros(8, dtype=bool)
+    for idx, (r, g, b) in enumerate(_PALETTE_RGB):
+        code = ((1 if r == 255 else 0) << 2) | ((1 if g == 255 else 0) << 1) | (1 if b == 255 else 0)
+        index_for_code[code] = idx
+        valid_code[code] = True
+    return index_for_code, valid_code
+
+
+_INDEX_FOR_CHANNEL_CODE, _VALID_CHANNEL_CODE = _build_channel_code_luts()
+_CODE_LUT = np.array(_CODE_FOR_PALETTE_INDEX, dtype=np.uint8)
 
 _BRIGHTNESS = 1.1
 _CONTRAST = 1.2
@@ -170,43 +191,38 @@ def _library_dither_indices(img: Image.Image, dither: str) -> bytearray:
     )
     result = result.convert("RGB")
 
-    width, height = result.size
-    indices = bytearray(width * height)
-    for i, px in enumerate(result.getdata()):
-        idx = _RGB_TO_INDEX.get(px)
-        if idx is None:
-            # Shouldn't normally happen (dithered output should already be
-            # snapped to palette colors), but don't crash if it does.
-            idx = _nearest_palette_index(*px)
-        indices[i] = idx
-    return indices
+    # Vectorized: every pixel's R/G/B channel is compared against 255 once
+    # (not per-pixel in a Python loop), then reduced to its 3-bit channel
+    # code and mapped through the 8-entry LUT above.
+    arr = np.asarray(result, dtype=np.uint8)
+    r_hi, g_hi, b_hi = arr[..., 0] == 255, arr[..., 1] == 255, arr[..., 2] == 255
+    channel_is_binary = ((arr[..., 0] == 0) | r_hi) & ((arr[..., 1] == 0) | g_hi) & ((arr[..., 2] == 0) | b_hi)
+    code = (r_hi.astype(np.uint8) << 2) | (g_hi.astype(np.uint8) << 1) | b_hi.astype(np.uint8)
+    valid = channel_is_binary & _VALID_CHANNEL_CODE[code]
+    indices = _INDEX_FOR_CHANNEL_CODE[code]
+
+    if not valid.all():
+        # Shouldn't normally happen (dithered output should already be
+        # snapped to palette colors), but don't crash if it does.
+        for y, x in zip(*np.where(~valid)):
+            indices[y, x] = _nearest_palette_index(*arr[y, x].tolist())
+
+    return bytearray(indices.reshape(-1).tobytes())
 
 
 def _pack_bin(indices: bytes | bytearray, width: int, height: int) -> bytes:
     """indices: flat, row-major buffer of palette indices (0-5), length
     width * height."""
-    bytes_per_half_row = width // 4
-    left = bytearray(height * bytes_per_half_row)
-    right = bytearray(height * bytes_per_half_row)
+    # Vectorized: see _library_dither_indices for why. Same left/right-half,
+    # high/low-nibble layout as the original per-pixel loop.
+    idx = np.frombuffer(bytes(indices), dtype=np.uint8).reshape(height, width)
+    codes = _CODE_LUT[idx]
+    left_half, right_half = codes[:, 0 : width // 2], codes[:, width // 2 : width]
 
-    li = 0
-    ri = 0
-    for y in range(height):
-        row_offset = y * width
-        for x in range(0, width // 2, 2):
-            hi = _CODE_FOR_PALETTE_INDEX[indices[row_offset + x]]
-            lo = _CODE_FOR_PALETTE_INDEX[indices[row_offset + x + 1]]
-            left[li] = (hi << 4) | lo
-            li += 1
-        for x in range(width // 2, width, 2):
-            hi = _CODE_FOR_PALETTE_INDEX[indices[row_offset + x]]
-            lo = _CODE_FOR_PALETTE_INDEX[indices[row_offset + x + 1]]
-            right[ri] = (hi << 4) | lo
-            ri += 1
+    def _pack_half(half: np.ndarray) -> bytes:
+        return ((half[:, 0::2] << 4) | half[:, 1::2]).astype(np.uint8).tobytes()
 
-    assert li == height * bytes_per_half_row
-    assert ri == height * bytes_per_half_row
-    return bytes(left) + bytes(right)
+    return _pack_half(left_half) + _pack_half(right_half)
 
 
 def _indices_to_preview_png(indices: bytes | bytearray, width: int, height: int) -> bytes:

@@ -8,6 +8,7 @@ not before.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -59,3 +60,21 @@ def device_model_name(panel_size: str | None) -> str:
     if panel_size:
         return f'E-Ink Canvas {panel_size}" (Spectra 6)'
     return DEFAULT_MODEL_NAME
+
+
+def panel_size_from_info(info: dict[str, Any]) -> str | None:
+    """Dig the panel-size string out of a raw info dict.
+
+    Panel size isn't in /api/info's JSON at all -- see api.get_info_page
+    for where it actually comes from (best-effort HTML scrape). Shared by
+    a running coordinator's data and a discovery probe's result (see
+    discovery.probe_frame), which use the same {"info_page": {...}} shape
+    but are read at different times (after vs. before the config entry
+    exists).
+    """
+    return (info.get("info_page") or {}).get("panel_size")
+
+
+def device_model_from_info(info: dict[str, Any]) -> str:
+    """device_model_name(), reading panel_size out of a raw info dict."""
+    return device_model_name(panel_size_from_info(info))

@@ -47,7 +47,7 @@ from .const import (
     SERVICE_UPDATE_ALBUM,
 )
 from .coordinator import FraimicAlbumsCoordinator, FraimicCoordinator
-from .entity import FraimicEntity
+from .entity import FraimicEntity, dig_path
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
 
 # All state comes from the coordinators' shared poll, not per-entity I/O,
@@ -336,11 +336,7 @@ class FraimicInfoSensor(FraimicEntity, SensorEntity):
 
     @property
     def native_value(self) -> StateType | datetime:
-        value: Any = self.coordinator.data or {}
-        for key in self._path:
-            if not isinstance(value, dict):
-                return None
-            value = value.get(key)
+        value = dig_path(self.coordinator.data or {}, self._path)
 
         if self.entity_description.device_class == SensorDeviceClass.TIMESTAMP:
             return _parse_timestamp(value)

@@ -6,6 +6,8 @@ platform module only has to describe what's different about its entities.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -19,13 +21,34 @@ def entity_unique_id(entry: ConfigEntry, key: str) -> str:
     return f"{device_key(entry)}_{key}"
 
 
+def dig_path(data: dict[str, Any], path: tuple[str, ...]) -> Any:
+    """Walk a (possibly nested) path through a dict, tolerating a shape
+    mismatch at any level -- used by the FraimicInfoSensor/FraimicInfo
+    BinarySensor platforms, whose path is only known at runtime (raw JSON
+    from the frame's /api/info)."""
+    value: Any = data
+    for key in path:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
+
+
+def device_identity_base(entry: ConfigEntry, base_url: str) -> dict[str, Any]:
+    """The device-identity fields shared by every entity's DeviceInfo *and*
+    __init__.py's explicit device_reg.async_get_or_create() call (which adds
+    model/sw_version on top, since those are only known once the coordinator
+    has data). Kept in one place so the two never drift apart."""
+    return {
+        "identifiers": {(DOMAIN, device_key(entry))},
+        "name": "Fraimic E-Ink Canvas",
+        "manufacturer": "Fraimic",
+        "configuration_url": base_url,
+    }
+
+
 def device_info(entry: ConfigEntry, base_url: str) -> DeviceInfo:
-    return DeviceInfo(
-        identifiers={(DOMAIN, device_key(entry))},
-        name="Fraimic E-Ink Canvas",
-        manufacturer="Fraimic",
-        configuration_url=base_url,
-    )
+    return DeviceInfo(**device_identity_base(entry, base_url))
 
 
 class FraimicEntity(CoordinatorEntity[FraimicBaseCoordinator]):

@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Versions before 1.0.0 are not retroactively documented. See git history / GitHub releases for those.
 
+## [Unreleased]
+
+### Fixed
+- `media_player.py`'s `_convert_and_send` could permanently leak `_busy_lock` if an exception occurred in its setup code (device-orientation/panel-size lookup) before the original `try` block began -- every later send would then fail with "already busy" until the integration was reloaded. Fixed by widening the `try`/`finally` to cover that setup code too.
+
+### Changed
+- `api.py`'s `get_info_page` now scrapes the `/info` admin page's label/value rows in a single pass (`_info_page_values`) instead of a separate `re.search` per field; verified against the existing `test_api.py` fixtures (including the badge-wrapped "Registration" row, still correctly ignored). No behavior change.
+- Device-identity fields (`identifiers`/`name`/`manufacturer`/`configuration_url`) shared by `__init__.py`'s `device_reg.async_get_or_create()` and `entity.py`'s `device_info()` consolidated into one `device_identity_base()` helper, so the two can no longer drift apart. No behavior change.
+- `image_converter.py`'s per-pixel palette-index mapping and 4-bit bit-packing (previously pure-Python loops over every pixel) now use numpy, new dependency. ~15-35x faster for that part of the conversion (measured: 13.3" panel ~0.3s -> ~0.02s, 31.5" panel ~0.6s -> ~0.03s), verified byte-for-byte identical output against the old implementation across every dither mode, both panel sizes, and the defensive "unexpected color" fallback path. The dithering step itself (the `epaper-dithering` Rust extension) is unchanged.
+- `requirements.txt`'s `epaper-dithering` floor bumped to `>=5.0.9` to match `manifest.json` (had drifted out of sync from a previous Dependabot bump that was only applied to one of the two files).
+- The duplicated dict-walking loop in `binary_sensor.py`'s `FraimicInfoBinarySensor` and `sensor.py`'s `FraimicInfoSensor` consolidated into `entity.py`'s shared `dig_path()` helper. No behavior change.
+- The duplicated "model name from a raw info dict" logic in `config_flow.py` (`_model_of`) and `media_player.py` consolidated into `frame_types.py`'s shared `device_model_from_info()`/`panel_size_from_info()` helpers. No behavior change.
+- Remaining em-dashes in `quality_scale.yaml`'s comments replaced with plain punctuation, matching the rest of this HACS collection's writing style.
+
 ## [1.1.0] - 2026-07-13
 
 Raises a self-healing notification if album syncing keeps failing while the frame is clearly awake, and now only logs when the frame's reachability actually changes rather than on every missed check while it's asleep. The README also gained a proper explanation of how updates work, plus troubleshooting and known-limitations sections. Also includes a precautionary fix for a bug that could have stopped images from sending once Home Assistant itself moves to a newer Python version.
