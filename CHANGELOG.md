@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Versions before 1.0.0 are not retroactively documented. See git history / GitHub releases for those.
 
-## [Unreleased]
+## [1.1.1] - 2026-07-14
+
+Photo conversion is now noticeably faster (roughly 15-35x for the part of the process that turns a dithered image into the frame's own buffer format), thanks to a new numpy dependency. Also fixes a bug where the media player could get permanently stuck reporting "busy" after certain setup failures, requiring a reload to recover.
 
 ### Fixed
 - `media_player.py`'s `_convert_and_send` could permanently leak `_busy_lock` if an exception occurred in its setup code (device-orientation/panel-size lookup) before the original `try` block began -- every later send would then fail with "already busy" until the integration was reloaded. Fixed by widening the `try`/`finally` to cover that setup code too.
