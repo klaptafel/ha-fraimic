@@ -6,6 +6,7 @@ platform module only has to describe what's different about its entities.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -34,16 +35,37 @@ def dig_path(data: dict[str, Any], path: tuple[str, ...]) -> Any:
     return value
 
 
-def device_info(entry: ConfigEntry, base_url: str) -> DeviceInfo:
+@dataclass(frozen=True)
+class DeviceIdentity:
     """The device-identity fields shared by every entity's DeviceInfo *and*
     __init__.py's explicit device_reg.async_get_or_create() call (which adds
     model/sw_version on top, since those are only known once the coordinator
-    has data). Kept in one place so the two never drift apart."""
-    return DeviceInfo(
+    has data). Kept in one place so the two never drift apart. A plain
+    dataclass (not a dict/TypedDict) so each caller assigns its own fields
+    explicitly -- DeviceInfo is a TypedDict, which mypy --strict won't let
+    a plain dict's ** expansion construct or extend safely."""
+    identifiers: set[tuple[str, str]]
+    name: str
+    manufacturer: str
+    configuration_url: str
+
+
+def device_identity(entry: ConfigEntry, base_url: str) -> DeviceIdentity:
+    return DeviceIdentity(
         identifiers={(DOMAIN, device_key(entry))},
         name="Fraimic E-Ink Canvas",
         manufacturer="Fraimic",
         configuration_url=base_url,
+    )
+
+
+def device_info(entry: ConfigEntry, base_url: str) -> DeviceInfo:
+    identity = device_identity(entry, base_url)
+    return DeviceInfo(
+        identifiers=identity.identifiers,
+        name=identity.name,
+        manufacturer=identity.manufacturer,
+        configuration_url=identity.configuration_url,
     )
 
 

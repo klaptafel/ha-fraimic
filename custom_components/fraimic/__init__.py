@@ -12,7 +12,7 @@ from homeassistant.helpers import service as service_helper
 
 from .const import CONF_HOST, DOMAIN, SEND_IMAGE_SCHEMA, SERVICE_SEND_IMAGE
 from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
-from .entity import device_info
+from .entity import device_identity
 from .frame_types import device_model_from_info
 from .image_store import FraimicImageStore
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData
@@ -61,9 +61,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
     # device page immediately, and stay in sync as firmware changes (or, on
     # a later poll, once the model's best-effort detection first succeeds).
     device_reg = dr.async_get(hass)
+    identity = device_identity(entry, coordinator.base_url)
     device_entry = device_reg.async_get_or_create(
         config_entry_id=entry.entry_id,
-        **device_info(entry, coordinator.base_url),
+        identifiers=identity.identifiers,
+        name=identity.name,
+        manufacturer=identity.manufacturer,
+        configuration_url=identity.configuration_url,
         model=device_model_from_info(coordinator.data or {}),
         sw_version=(coordinator.data or {}).get("firmware_version"),
     )
