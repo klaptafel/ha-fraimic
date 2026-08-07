@@ -14,5 +14,5 @@
 # "Requirements for fraimic not found". Keep this floor low (only bump it
 # if you've actually verified the new minimum against a real HA install).
 Pillow>=9.1.0
-epaper-dithering>=5.0.9,<6
+epaper-dithering>=6.0.0,<7
 numpy>=1.24.0
