@@ -15,6 +15,7 @@ from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, Fr
 from .entity import device_identity
 from .frame_types import device_model_from_info
 from .image_store import FraimicImageStore
+from .resend_guard import FraimicResendGuard
 from .runtime_data import FraimicConfigEntry, FraimicRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
@@ -86,6 +87,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
             device_reg.async_update_device(device_entry.id, **updates)
 
     entry.async_on_unload(coordinator.async_add_listener(_sync_device_info))
+
+    # Opt-in (see CONF_RESEND_AFTER_REFRESH's own comment) -- registered
+    # unconditionally regardless of whether it's currently enabled, since
+    # an Options change doesn't reload this entry (no update listener is
+    # registered for that, matching every other Options field here) and
+    # _on_coordinator_update itself checks the current setting fresh on
+    # every poll instead.
+    resend_guard = FraimicResendGuard(hass, entry, entry.runtime_data)
+    entry.async_on_unload(resend_guard.async_setup())
 
     # Registered once here (not per media_player platform setup) via the
     # current recommended helper -- guarded since async_setup_entry can run

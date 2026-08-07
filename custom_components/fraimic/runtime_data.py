@@ -31,6 +31,19 @@ def send_status_signal(entry: ConfigEntry) -> str:
     return f"{DOMAIN}_{entry.entry_id}_send_status_updated"
 
 
+def resend_requested_signal(entry: ConfigEntry) -> str:
+    """Dispatcher signal name for "please resend the last image now" --
+    fired by FraimicResendGuard once it sees the frame's own next_refresh
+    has moved past what was last confirmed sent (see resend_guard.py),
+    handled by the media player entity itself so the busy_lock/send-status
+    bookkeeping stays in exactly one place
+    (FraimicMediaPlayer._resend_last_image) instead of being duplicated in
+    the guard too. Carries the new next_refresh value as its one signal
+    argument, so the media player can record it once the resend actually
+    succeeds."""
+    return f"{DOMAIN}_{entry.entry_id}_resend_requested"
+
+
 @dataclass
 class FraimicSendStatus:
     """In-flight state of the media player's convert+upload pipeline,

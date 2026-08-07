@@ -107,6 +107,23 @@ DEVICE_ORIENTATIONS = ("portrait", "landscape")
 CONF_DEFAULT_FIT = "default_fit"
 CONF_DEFAULT_DITHER = "default_dither"
 
+# The frame wakes and redraws on its own internal schedule (display.
+# next_refresh, see coordinator.py/sensor.py's "Next Scheduled Refresh"),
+# completely independent of whatever this integration last pushed to it --
+# confirmed live, 2026-08-07: a frame with no active cloud album still
+# wakes and redraws on this schedule, rendering black since it has nothing
+# valid to draw from (direct user feedback, real device). Opt-in (default
+# off) since it's new behavior that reaches out to the frame on its own,
+# not something every setup necessarily wants. See resend_guard.py for the
+# actual detection logic -- deliberately reactive (triggered by the
+# regular coordinator poll happening to succeed), not a separately timed
+# attempt: the frame is asleep too often for timing around its own
+# schedule to be reliable, and a fixed delay risked resending on every
+# Home Assistant restart regardless of whether anything actually changed
+# (also direct user feedback, same date).
+CONF_RESEND_AFTER_REFRESH = "resend_after_scheduled_refresh"
+DEFAULT_RESEND_AFTER_REFRESH = False
+
 # How long we tolerate silence from the frame before treating entities as
 # genuinely unavailable instead of just "asleep right now". The frame only
 # wakes on a tap or its own refresh schedule, so it can legitimately be

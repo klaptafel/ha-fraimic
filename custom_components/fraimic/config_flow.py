@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -26,9 +27,11 @@ from .const import (
     CONF_DEFAULT_FIT,
     CONF_DEVICE_ORIENTATION,
     CONF_HOST,
+    CONF_RESEND_AFTER_REFRESH,
     DEFAULT_DEVICE_ORIENTATION,
     DEFAULT_DITHER,
     DEFAULT_FIT,
+    DEFAULT_RESEND_AFTER_REFRESH,
     DEVICE_ORIENTATIONS,
     DITHER_MODES,
     DOMAIN,
@@ -208,7 +211,8 @@ class FraimicConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class FraimicOptionsFlow(config_entries.OptionsFlow):
-    """Defaults used when tapping an image in the media browser.
+    """Defaults used when tapping an image in the media browser, plus the
+    resend-after-refresh workaround.
 
     The media browser just fires play_media with no way to pass extra
     parameters, unlike the fraimic.send_image service (which always lets
@@ -216,6 +220,11 @@ class FraimicOptionsFlow(config_entries.OptionsFlow):
     `device_orientation` is the one exception -- it's a fact about how
     the frame is physically mounted, not something that varies per image,
     so it's Options-only (not a send_image field).
+
+    Resend-after-refresh (see resend_guard.py) is unrelated to any of
+    that -- it's read fresh on every coordinator update, not cached, so
+    changing it here takes effect on the frame's *next* poll without
+    needing to reload the integration.
     """
 
     async def async_step_init(
@@ -237,6 +246,10 @@ class FraimicOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_DEFAULT_DITHER, default=current.get(CONF_DEFAULT_DITHER, DEFAULT_DITHER)
                 ): SelectSelector(SelectSelectorConfig(options=list(DITHER_MODES))),
+                vol.Optional(
+                    CONF_RESEND_AFTER_REFRESH,
+                    default=current.get(CONF_RESEND_AFTER_REFRESH, DEFAULT_RESEND_AFTER_REFRESH),
+                ): BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

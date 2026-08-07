@@ -190,11 +190,12 @@
     "step": {
       "init": {
         "title": "Display defaults",
-        "description": "Used when picking images from the media browser. The send_image service can override fit/dither per call; device orientation always comes from here.",
+        "description": "The first three are used when picking images from the media browser (the send_image service can override fit/dither per call; device orientation always comes from here). The frame wakes and redraws on its own internal schedule too, independent of anything sent from here -- if you don't use a Fraimic cloud album, that can leave the screen black until the next real send. Enable the last option to automatically resend the last image once this integration next notices the frame has gone through a scheduled refresh since.",
         "data": {
           "device_orientation": "Device orientation (physical mounting)",
           "default_fit": "Default fit",
-          "default_dither": "Default dithering"
+          "default_dither": "Default dithering",
+          "resend_after_scheduled_refresh": "Resend last image after the frame's own scheduled refresh"
         }
       }
     }

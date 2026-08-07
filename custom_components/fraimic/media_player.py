@@ -17,7 +17,7 @@ import logging
 import os
 import urllib.parse
 from datetime import timedelta
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from aiohttp import ClientError
 
@@ -35,7 +35,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.network import get_url
 from homeassistant.util import dt as dt_util
@@ -55,7 +55,12 @@ from .const import (
 from .entity import FraimicEntity
 from .frame_types import frame_type_for_size, panel_size_from_info
 from .image_converter import convert_image
-from .runtime_data import FraimicConfigEntry, FraimicRuntimeData, send_status_signal
+from .runtime_data import (
+    FraimicConfigEntry,
+    FraimicRuntimeData,
+    resend_requested_signal,
+    send_status_signal,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,6 +126,22 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
         self._busy_lock = asyncio.Lock()
         self._attr_state = MediaPlayerState.IDLE
         self._send_status_signal = send_status_signal(entry)
+        self._resend_requested_signal = resend_requested_signal(entry)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # See resend_scheduler.py's own module docstring for why this
+        # exists: fired shortly after the frame's own scheduled refresh,
+        # asking this entity to re-upload the last image verbatim. Handled
+        # here (not inside the scheduler itself) so the busy_lock/send-
+        # status bookkeeping this already needs stays in one place.
+        # _resend_last_image is a coroutine function, so the dispatcher
+        # itself schedules it as a task -- no separate wrapper needed here.
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, self._resend_requested_signal, self._resend_last_image
+            )
+        )
 
     # -- "album art" for the last image sent, shown as entity_picture --
 
@@ -232,18 +253,10 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
         self, raw_bytes: bytes, fit: str, dither: str, dry_run: bool = False, source: str = ""
     ) -> None:
         """Runs as a background task -- _busy_lock is already held by the
-        caller (_queue_send) and is released here, regardless of outcome."""
-        # status is read in the except/finally blocks below, so it's
-        # assigned before the try (not inside it) -- otherwise a failure in
-        # the try's own setup code, before this line runs, would leave
-        # `status` unbound and turn the finally block's cleanup itself into
-        # an UnboundLocalError instead of releasing _busy_lock.
-        status = self._runtime.send_status
-        # Wrapped in the same try/finally as the conversion/upload below
-        # (not just that part) so a failure in this setup code still
-        # reaches the finally block and releases _busy_lock -- otherwise
-        # every later send would fail with "already busy" until reload.
-        try:
+        caller (_queue_send) and is released here (via _run_tracked_send),
+        regardless of outcome."""
+
+        async def _do_convert_and_send() -> None:
             # device_orientation isn't caller-supplied -- it's a fact about
             # how the frame is physically mounted, not something that varies
             # per image, so it always comes straight from Options rather than
@@ -258,10 +271,6 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
             panel_size = panel_size_from_info(self._runtime.coordinator.data or {})
             frame_type = frame_type_for_size(panel_size)
 
-            self._attr_state = MediaPlayerState.BUFFERING
-            status.sending = _display_name(source)
-            status.send_failed = None
-            self._notify_send_status_changed()
             bin_data, preview_png = await self.hass.async_add_executor_job(
                 lambda: convert_image(
                     raw_bytes,
@@ -272,11 +281,99 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                     height=frame_type.height,
                 )
             )
+            # Recorded only for a real upload, never a dry run -- a dry run
+            # never actually reaches the frame, so marking it "confirmed
+            # synced" as of the current next_refresh would be wrong: see
+            # resend_guard.py's own detection logic, which trusts this
+            # value to mean the frame genuinely has this exact image.
+            next_refresh = None
             if dry_run:
                 _LOGGER.debug("dry_run=True: skipping upload to %s", self._runtime.base_url)
             else:
                 await self._upload_waiting_for_frame(bin_data)
-            await self._runtime.image_store.async_set(preview_png)
+                next_refresh = ((self._runtime.coordinator.data or {}).get("display") or {}).get(
+                    "next_refresh"
+                )
+            await self._runtime.image_store.async_set(preview_png, bin_data, next_refresh)
+
+        await self._run_tracked_send(_display_name(source), _do_convert_and_send)
+
+    async def _resend_last_image(self, next_refresh: str) -> None:
+        """Re-uploads the exact bytes last sent, verbatim -- no
+        reconversion (see image_store.py's own bin_content comment).
+        Triggered by resend_guard.py's own dispatcher signal once it sees
+        the frame's own next_refresh has moved on since this exact image
+        was last confirmed sent: the frame wakes and redraws on its own
+        schedule, independent of what Home Assistant last pushed, so a
+        frame with no active cloud album goes black at that point even
+        though the last real send is still perfectly valid -- see
+        resend_guard.py's own module docstring for the full story.
+        `next_refresh` is the value resend_guard.py detected the change
+        against; recorded via image_store.async_set once this resend
+        actually succeeds, so a later poll seeing that same value again
+        doesn't trigger another one for nothing.
+
+        Silently skipped (not surfaced as an error anywhere -- this is a
+        background action, not something a person is waiting on) whenever
+        nothing has ever been sent yet, or a real send/another resend is
+        already in flight; resend_guard.py will simply notice again on a
+        later poll if this one gets skipped.
+
+        Already runs as its own background task -- the dispatcher itself
+        schedules this (a coroutine function) via hass.async_create_task
+        when resend_guard.py's signal fires (see async_added_to_hass) --
+        so this awaits _run_tracked_send directly, unlike _queue_send's
+        own synchronous-acquire-then-dispatch two-step, which exists
+        specifically to let a *caller* (a service call/media browser tap)
+        return immediately instead of blocking on the send.
+        """
+        image_store = self._runtime.image_store
+        bin_data = image_store.bin_content
+        if bin_data is None or self._busy_lock.locked():
+            return
+        await self._busy_lock.acquire()
+
+        async def _do_resend() -> None:
+            await self._upload_waiting_for_frame(bin_data)
+            await image_store.async_set(image_store.content, bin_data, next_refresh)
+
+        await self._run_tracked_send("scheduled resend", _do_resend, background=True)
+
+    async def _run_tracked_send(
+        self, display_name: str, action: Callable[[], Awaitable[None]], *, background: bool = False
+    ) -> None:
+        """Runs `action` (the actual conversion+upload, or just a verbatim
+        re-upload) with the send-status bookkeeping, busy_lock release, and
+        error handling shared by every send path -- factored out
+        (2026-08-07) so a scheduled resend doesn't have to duplicate this
+        block's five different exception cases just to reuse one of them
+        (ClientError/TimeoutError, meaning the frame never woke up).
+
+        `background=True` (used by the scheduled resend) still logs a
+        failure, but does NOT set status.send_failed -- direct user
+        feedback, 2026-08-07: a missed automatic resend (the frame's own
+        wake window after next_refresh can be short, and the configured
+        delay might not land inside it) isn't something to act on, since
+        resend_scheduler.py will simply try again at the frame's own next
+        scheduled refresh regardless. Leaving "Frame never woke up, gave
+        up: scheduled resend" lingering as the visible Send Status until
+        something else overwrites it would misrepresent a normal, self-
+        correcting background retry as a real problem -- that message is
+        reserved for a real, user-initiated send failing, where it's the
+        only feedback channel this integration has (see
+        FraimicSendStatus's own docstring)."""
+        # status is read in the except/finally blocks below, so it's
+        # assigned before the try (not inside it) -- otherwise a failure in
+        # `action`'s own setup code, before this line runs, would leave
+        # `status` unbound and turn the finally block's cleanup itself into
+        # an UnboundLocalError instead of releasing _busy_lock.
+        status = self._runtime.send_status
+        try:
+            self._attr_state = MediaPlayerState.BUFFERING
+            status.sending = display_name
+            status.send_failed = None
+            self._notify_send_status_changed()
+            await action()
         except (ClientError, TimeoutError):
             _LOGGER.warning(
                 "Fraimic frame at %s never woke up within %s -- gave up sending %s",
@@ -284,13 +381,16 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                 WAKE_WAIT_TIMEOUT,
                 status.sending,
             )
-            status.send_failed = status.sending
+            if not background:
+                status.send_failed = status.sending
         except HomeAssistantError as err:
             _LOGGER.warning("Fraimic failed to send %s: %s", status.sending, err)
-            status.send_failed = status.sending
+            if not background:
+                status.send_failed = status.sending
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Fraimic: unexpected error sending %s", status.sending)
-            status.send_failed = status.sending
+            if not background:
+                status.send_failed = status.sending
         finally:
             status.sending = None
             status.waiting_for_wake = False
