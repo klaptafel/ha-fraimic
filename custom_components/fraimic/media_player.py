@@ -241,9 +241,16 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                 translation_domain=DOMAIN, translation_key="already_busy"
             )
         await self._busy_lock.acquire()
-        # Tracked on the config entry (not a bare hass.async_create_task) so
-        # HA waits for/cancels it on unload instead of leaving it dangling.
-        self._entry.async_create_task(
+        # async_create_BACKGROUND_task, not the plain entry.async_create_task
+        # this used to call (found live, 2026-08-17): confirmed against
+        # config_entries.py's own real source -- a plain async_create_task is
+        # only ever *waited on* (10s) during unload, never actually
+        # cancelled; only a background task gets task.cancel() called on it
+        # first. _convert_and_send's own wake-wait retry loop can run for up
+        # to WAKE_WAIT_TIMEOUT (10 minutes), so any unload/reload landing
+        # inside that window used to always log "Task ... did not complete
+        # in time", every single time, since nothing ever told it to stop.
+        self._entry.async_create_background_task(
             self.hass,
             self._convert_and_send(raw_bytes, fit, dither, dry_run=dry_run, source=source),
             name="fraimic_convert_and_send",
