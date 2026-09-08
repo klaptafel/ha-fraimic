@@ -336,13 +336,14 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
         """
         image_store = self._runtime.image_store
         bin_data = image_store.bin_content
-        if bin_data is None or image_store.content is None or self._busy_lock.locked():
+        content = image_store.content
+        if bin_data is None or content is None or self._busy_lock.locked():
             return
         await self._busy_lock.acquire()
 
         async def _do_resend() -> None:
             await self._upload_waiting_for_frame(bin_data)
-            await image_store.async_set(image_store.content, bin_data, next_refresh)
+            await image_store.async_set(content, bin_data, next_refresh)
 
         await self._run_tracked_send("scheduled resend", _do_resend, background=True)
 
