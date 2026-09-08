@@ -325,7 +325,7 @@ async def test_send_status_sensor_updates_live_via_dispatcher(
     media_title = entry.runtime_data.status_text
     assert send_status_state.state == media_title == "Sending photo.jpg…"
 
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     send_status_state = hass.states.get(_entity_id(hass, "sensor", "send_status"))
     assert send_status_state.state.startswith("Sent ")
 
