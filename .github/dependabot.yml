@@ -11,11 +11,14 @@ updates:
     labels:
       - "dependencies"
     ignore:
-      # Home Assistant core exact-pins its own Pillow version and refuses
-      # to install a different one for a custom integration -- bumping
-      # our floor above HA's current pin breaks setup entirely. Bump
-      # manually, only after verifying against a real HA install.
+      # Home Assistant core exact-pins its own Pillow and numpy versions
+      # and refuses to install a different one for a custom integration --
+      # bumping either floor above HA's current pin breaks setup entirely.
+      # Bump manually, only after verifying against a real HA install, not
+      # just against this repo's own CI, which has no such pin to
+      # conflict with in the first place.
       - dependency-name: "Pillow"
+      - dependency-name: "numpy"
 
   # Keeps the GitHub Actions themselves (if any get added later, e.g. for
   # HACS validation) up to date.
