@@ -43,7 +43,7 @@ async def test_setup_entry_success_registers_device_and_runtime_data(
     assert runtime.battery_coordinator.data == BATTERY
 
     device_reg = dr.async_get(hass)
-    device = device_reg.async_get_device(identifiers={(DOMAIN, device_key(entry))})
+    device = device_reg.async_get_device_by_identifier((DOMAIN, device_key(entry)), entry.entry_id)
     assert device is not None
     assert device.manufacturer == "Fraimic"
     assert device.sw_version == "1.0.0"
@@ -109,7 +109,7 @@ async def test_last_image_survives_unload_and_reload(hass: HomeAssistant, aiocli
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    updated_at = await entry.runtime_data.image_store.async_set(b"last-sent-preview-png")
+    updated_at = await entry.runtime_data.image_store.async_set(b"last-sent-preview-png", b"last-sent-bin-frame")
 
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
@@ -134,7 +134,7 @@ async def test_removing_entry_deletes_persisted_image(hass: HomeAssistant, aiocl
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    await entry.runtime_data.image_store.async_set(b"last-sent-preview-png")
+    await entry.runtime_data.image_store.async_set(b"last-sent-preview-png", b"last-sent-bin-frame")
 
     await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
@@ -156,7 +156,7 @@ async def test_device_model_reflects_detected_panel_size_at_setup(
     await hass.async_block_till_done()
 
     device_reg = dr.async_get(hass)
-    device = device_reg.async_get_device(identifiers={(DOMAIN, device_key(entry))})
+    device = device_reg.async_get_device_by_identifier((DOMAIN, device_key(entry)), entry.entry_id)
     assert device.model == 'E-Ink Canvas 13.3" (Spectra 6)'
 
 
@@ -175,7 +175,7 @@ async def test_device_model_syncs_once_detection_succeeds_on_later_refresh(
     await hass.async_block_till_done()
 
     device_reg = dr.async_get(hass)
-    device = device_reg.async_get_device(identifiers={(DOMAIN, device_key(entry))})
+    device = device_reg.async_get_device_by_identifier((DOMAIN, device_key(entry)), entry.entry_id)
     assert device.model == "E-Ink Canvas (Spectra 6)"
 
     aioclient_mock.clear_requests()
@@ -183,7 +183,7 @@ async def test_device_model_syncs_once_detection_succeeds_on_later_refresh(
     aioclient_mock.get(f"{HOST}/info", text=INFO_PAGE_HTML)
     await entry.runtime_data.coordinator.async_refresh()
 
-    device = device_reg.async_get_device(identifiers={(DOMAIN, device_key(entry))})
+    device = device_reg.async_get_device_by_identifier((DOMAIN, device_key(entry)), entry.entry_id)
     assert device.model == 'E-Ink Canvas 13.3" (Spectra 6)'
 
 
@@ -202,5 +202,5 @@ async def test_firmware_version_syncs_to_device_on_later_refresh(
     await entry.runtime_data.coordinator.async_refresh()
 
     device_reg = dr.async_get(hass)
-    device = device_reg.async_get_device(identifiers={(DOMAIN, device_key(entry))})
+    device = device_reg.async_get_device_by_identifier((DOMAIN, device_key(entry)), entry.entry_id)
     assert device.sw_version == "2.0.0"

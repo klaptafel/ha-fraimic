@@ -16,6 +16,8 @@ from custom_components.fraimic.const import (
     CONF_DEFAULT_FIT,
     CONF_DEVICE_ORIENTATION,
     CONF_HOST,
+    CONF_RESEND_AFTER_REFRESH,
+    DEFAULT_RESEND_AFTER_REFRESH,
     DOMAIN,
 )
 
@@ -336,4 +338,5 @@ async def test_options_flow(hass: HomeAssistant) -> None:
         CONF_DEVICE_ORIENTATION: "landscape",
         CONF_DEFAULT_FIT: "fill",
         CONF_DEFAULT_DITHER: "atkinson",
+        CONF_RESEND_AFTER_REFRESH: DEFAULT_RESEND_AFTER_REFRESH,
     }
