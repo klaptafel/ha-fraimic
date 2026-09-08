@@ -336,7 +336,7 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
         """
         image_store = self._runtime.image_store
         bin_data = image_store.bin_content
-        if bin_data is None or self._busy_lock.locked():
+        if bin_data is None or image_store.content is None or self._busy_lock.locked():
             return
         await self._busy_lock.acquire()
 
