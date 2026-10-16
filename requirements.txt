@@ -16,5 +16,5 @@
 # a real HA install, not just against this file's own CI, which has no
 # such pin to conflict with in the first place).
 Pillow>=9.1.0
-epaper-dithering>=6.0.0,<7
+epaper-dithering>=6.1.1,<7
 numpy>=1.24.0
