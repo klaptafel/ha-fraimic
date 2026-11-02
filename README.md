@@ -1,5 +1,5 @@
 [![Made for Home Assistant](https://img.shields.io/badge/Made%20for-Home%20Assistant-blue?style=for-the-badge&logo=homeassistant)](https://www.home-assistant.io/)
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
+[![marketplace_badge](https://img.shields.io/badge/Marketplace-Custom-orange.svg?style=for-the-badge)](https://contributors.home-assistant.io/marketplace/)
 
 # Fraimic E-Ink Canvas: Home Assistant integration
 
@@ -16,7 +16,7 @@
 
 ## Installation
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klaptafel&repository=ha-fraimic&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=klaptafel&repository=ha-fraimic&category=integration)
 
 Add the integration and Home Assistant will find your frame on the network by itself. You can also
 type in its address yourself if you prefer.
