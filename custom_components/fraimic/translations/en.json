@@ -108,6 +108,9 @@
     },
     "entity_not_found": {
       "message": "{entity_id} is not a Fraimic albums sensor."
+    },
+    "invalid_bin_size": {
+      "message": "File is {size} bytes, but this panel's frame buffer is {expected} bytes. Send a .bin made for this panel size."
     }
   },
   "issues": {
@@ -136,6 +139,16 @@
         "dry_run": {
           "name": "Dry run",
           "description": "Converts and previews the image without uploading it to the frame."
+        }
+      }
+    },
+    "send_bin": {
+      "name": "Send bin",
+      "description": "Sends an already-converted raw frame buffer (.bin) to the frame as-is, without any conversion. The file size must match the panel exactly. Runs in the background and waits up to 10 minutes for the frame to wake if it's asleep.",
+      "fields": {
+        "path": {
+          "name": "Path",
+          "description": "Path to the .bin file, e.g. /config/fraimic/artwork.bin. Must be in an allowed directory."
         }
       }
     },

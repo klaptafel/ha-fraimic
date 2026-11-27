@@ -12,7 +12,7 @@
 - **Buttons**: `Refresh Display` · `Restart` · `Sleep`
 - **Sensors**: `Battery` · `Battery Voltage` · `WiFi Signal` · `IP Address` · `Next Scheduled Refresh` · `Last Seen` · `Send Status` · `Albums`
 - **Binary sensors**: `Charging` · `Charging Cable Connected` · `Reachable` · `Render Problem` · `Voice Recording` · `Keep Awake` · `Auto Update` · `Charging LED`
-- **Services**: `fraimic.send_image` · `fraimic.update_album`
+- **Services**: `fraimic.send_image` · `fraimic.send_bin` · `fraimic.update_album`
 
 ## Installation
 
@@ -88,6 +88,22 @@ automation:
         data:
           media_content_id: media-source://media_source/local/calendar-today.png
           media_content_type: image/png
+```
+
+### Sending a pre-converted `.bin`
+
+`fraimic.send_bin` uploads a raw frame buffer (`.bin`) exactly as it is -- no conversion, fit or
+dithering -- for when you produce the image yourself (for example with a converter calibrated to
+your panel's real ink colors). The file must be exactly the size of your panel's frame buffer
+(960,000 bytes for the 13.3", 2,304,000 bytes for the 31.5"), and live in a directory Home
+Assistant is allowed to read (`allowlist_external_dirs` or `/config/www`).
+
+```yaml
+action: fraimic.send_bin
+target:
+  entity_id: media_player.fraimic_e_ink_canvas_display
+data:
+  path: /config/fraimic/artwork.bin
 ```
 
 ## Troubleshooting

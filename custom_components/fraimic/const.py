@@ -83,6 +83,15 @@ SEND_IMAGE_SCHEMA: dict[str | vol.Marker, Any] = {
     vol.Optional(ATTR_DRY_RUN, default=DEFAULT_DRY_RUN): cv.boolean,
 }
 
+# Service for sending an already-converted raw frame buffer (`.bin`) -- e.g.
+# one produced by an external, calibrated converter -- straight to the
+# frame, with no conversion in between. Validated against the detected
+# panel's exact buffer size.
+SERVICE_SEND_BIN = "send_bin"
+SEND_BIN_SCHEMA: dict[str | vol.Marker, Any] = {
+    vol.Required(ATTR_PATH): cv.string,
+}
+
 # How the frame is physically mounted. The panel's native buffer is
 # ALWAYS 1200(w)x1600(h) -- that never changes, it's a hardware fact of
 # the EL133UF1 controller. This setting is about compensating for

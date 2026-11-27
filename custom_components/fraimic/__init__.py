@@ -10,7 +10,14 @@ from homeassistant.const import Platform
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import service as service_helper
 
-from .const import CONF_HOST, DOMAIN, SEND_IMAGE_SCHEMA, SERVICE_SEND_IMAGE
+from .const import (
+    CONF_HOST,
+    DOMAIN,
+    SEND_BIN_SCHEMA,
+    SEND_IMAGE_SCHEMA,
+    SERVICE_SEND_BIN,
+    SERVICE_SEND_IMAGE,
+)
 from .coordinator import FraimicAlbumsCoordinator, FraimicBatteryCoordinator, FraimicCoordinator
 from .entity import device_identity
 from .frame_types import device_model_from_info
@@ -110,6 +117,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: FraimicConfigEntry) -> b
             entity_domain=Platform.MEDIA_PLAYER,
             func="async_send_local_file",
             schema=SEND_IMAGE_SCHEMA,
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_SEND_BIN):
+        service_helper.async_register_platform_entity_service(
+            hass,
+            DOMAIN,
+            SERVICE_SEND_BIN,
+            entity_domain=Platform.MEDIA_PLAYER,
+            func="async_send_local_bin",
+            schema=SEND_BIN_SCHEMA,
         )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

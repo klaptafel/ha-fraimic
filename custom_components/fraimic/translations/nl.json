@@ -108,6 +108,9 @@
     },
     "entity_not_found": {
       "message": "{entity_id} is geen Fraimic albums-sensor."
+    },
+    "invalid_bin_size": {
+      "message": "Bestand is {size} bytes, maar de framebuffer van dit paneel is {expected} bytes. Stuur een .bin die voor dit paneelformaat is gemaakt."
     }
   },
   "issues": {
@@ -136,6 +139,16 @@
         "dry_run": {
           "name": "Testrun (dry run)",
           "description": "Converteert en toont de afbeelding zonder deze naar het frame te uploaden."
+        }
+      }
+    },
+    "send_bin": {
+      "name": "Bin versturen",
+      "description": "Stuurt een al geconverteerde ruwe framebuffer (.bin) ongewijzigd naar het frame, zonder conversie. De bestandsgrootte moet exact bij het paneel passen. Draait op de achtergrond en wacht tot 10 minuten tot het frame wakker wordt als het slaapt.",
+      "fields": {
+        "path": {
+          "name": "Pad",
+          "description": "Pad naar het .bin-bestand, bijv. /config/fraimic/kunstwerk.bin. Moet in een toegestane map staan."
         }
       }
     },

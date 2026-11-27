@@ -29,9 +29,12 @@ def test_frame_type_for_size_resolves_known_sizes() -> None:
     assert frame_type_for_size("13.3") is FRAME_TYPES["13.3"]
     thirty_one_five = frame_type_for_size("31.5")
     assert thirty_one_five is FRAME_TYPES["31.5"]
-    assert (thirty_one_five.width, thirty_one_five.height) == (2560, 1440)
+    assert (thirty_one_five.width, thirty_one_five.height) == (1440, 2560)
+    assert thirty_one_five.byte_layout == "blocks_315"
 
 
 def test_bin_size_matches_expected_byte_count() -> None:
     assert FRAME_TYPES["13.3"].bin_size == 960_000
-    assert FRAME_TYPES["31.5"].bin_size == 1_843_200
+    # 8 controller blocks of 720 x 800 pixels (the last block of each half is
+    # padded) -- NOT width * height // 2, which would be 1_843_200.
+    assert FRAME_TYPES["31.5"].bin_size == 2_304_000

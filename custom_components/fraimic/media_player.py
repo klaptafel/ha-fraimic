@@ -8,7 +8,8 @@ mechanism music players use for album art), instead of a separate image
 entity.
 
 Also exposes an entity service `fraimic.send_image` for pushing a file
-from disk directly (e.g. from an automation), bypassing the browser.
+from disk directly (e.g. from an automation), bypassing the browser, and
+`fraimic.send_bin` for pushing an already-converted raw frame buffer.
 """
 from __future__ import annotations
 
@@ -53,8 +54,8 @@ from .const import (
     DOMAIN,
 )
 from .entity import FraimicEntity
-from .frame_types import frame_type_for_size, panel_size_from_info
-from .image_converter import convert_image
+from .frame_types import FRAME_TYPES, FrameType, frame_type_for_size, panel_size_from_info
+from .image_converter import bin_to_preview_png, convert_image
 from .runtime_data import (
     FraimicConfigEntry,
     FraimicRuntimeData,
@@ -219,17 +220,9 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
         raw_bytes = await self.hass.async_add_executor_job(self._read_local_file, path)
         await self._queue_send(raw_bytes, fit, dither, dry_run=dry_run, source=path)
 
-    async def _queue_send(
-        self, raw_bytes: bytes, fit: str, dither: str, dry_run: bool = False, source: str = ""
-    ) -> None:
-        """Reject immediately if already busy, otherwise hand off to a
-        background task and return right away.
-
-        The frame is often asleep when a photo is picked -- waiting for it
-        to wake (see _upload_waiting_for_frame) can take minutes, and
-        blocking the triggering service call/media browser tap for that
-        long would be a worse experience than a queued background send.
-        """
+    async def _acquire_busy_lock(self) -> None:
+        """Reject immediately if already busy, otherwise take the lock
+        (released by _run_tracked_send once the background send ends)."""
         if self._busy_lock.locked():
             # Surfaces as a visible error toast in the UI -- important,
             # since otherwise repeated taps while a conversion+upload is
@@ -241,6 +234,19 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                 translation_domain=DOMAIN, translation_key="already_busy"
             )
         await self._busy_lock.acquire()
+
+    async def _queue_send(
+        self, raw_bytes: bytes, fit: str, dither: str, dry_run: bool = False, source: str = ""
+    ) -> None:
+        """Reject immediately if already busy, otherwise hand off to a
+        background task and return right away.
+
+        The frame is often asleep when a photo is picked -- waiting for it
+        to wake (see _upload_waiting_for_frame) can take minutes, and
+        blocking the triggering service call/media browser tap for that
+        long would be a worse experience than a queued background send.
+        """
+        await self._acquire_busy_lock()
         # async_create_BACKGROUND_task, not the plain entry.async_create_task
         # this used to call (found live, 2026-08-17): confirmed against
         # config_entries.py's own real source -- a plain async_create_task is
@@ -286,6 +292,7 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                     dither=dither,
                     width=frame_type.width,
                     height=frame_type.height,
+                    byte_layout=frame_type.byte_layout,
                 )
             )
             # Recorded only for a real upload, never a dry run -- a dry run
@@ -304,6 +311,72 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
             await self._runtime.image_store.async_set(preview_png, bin_data, next_refresh)
 
         await self._run_tracked_send(_display_name(source), _do_convert_and_send)
+
+    async def async_send_local_bin(self, path: str) -> None:
+        """Entity service: push an already-converted raw frame buffer
+        (`.bin`) from disk to the frame, as-is -- no conversion, fit or
+        dithering. The file must be exactly the size of this panel's frame
+        buffer (see frame_types.FrameType.bin_size)."""
+        if not self.hass.config.is_allowed_path(path):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="path_not_allowed",
+                translation_placeholders={"path": path},
+            )
+        bin_data = await self.hass.async_add_executor_job(self._read_local_file, path)
+        frame_type = self._frame_type_for_bin(bin_data)
+        await self._acquire_busy_lock()
+        self._entry.async_create_background_task(
+            self.hass,
+            self._send_bin(bin_data, frame_type, source=path),
+            name="fraimic_send_bin",
+        )
+
+    def _frame_type_for_bin(self, bin_data: bytes) -> FrameType:
+        """The frame type `bin_data` is a buffer for, or raise.
+
+        With a detected panel size, the file must be exactly that panel's
+        buffer size. If detection hasn't succeeded yet (best-effort, see
+        api.get_info_page), any known panel's size is accepted and the
+        frame itself has the final say (400 invalid_image_size)."""
+        panel_size = panel_size_from_info(self._runtime.coordinator.data or {})
+        candidates = (
+            [frame_type_for_size(panel_size)]
+            if panel_size in FRAME_TYPES
+            else list(FRAME_TYPES.values())
+        )
+        for frame_type in candidates:
+            if len(bin_data) == frame_type.bin_size:
+                return frame_type
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="invalid_bin_size",
+            translation_placeholders={
+                "size": str(len(bin_data)),
+                "expected": ", ".join(str(ft.bin_size) for ft in candidates),
+            },
+        )
+
+    async def _send_bin(self, bin_data: bytes, frame_type: FrameType, source: str = "") -> None:
+        """Runs as a background task -- _busy_lock is already held by the
+        caller and released by _run_tracked_send."""
+
+        async def _do_send_bin() -> None:
+            preview_png = await self.hass.async_add_executor_job(
+                lambda: bin_to_preview_png(
+                    bin_data,
+                    width=frame_type.width,
+                    height=frame_type.height,
+                    byte_layout=frame_type.byte_layout,
+                )
+            )
+            await self._upload_waiting_for_frame(bin_data)
+            next_refresh = ((self._runtime.coordinator.data or {}).get("display") or {}).get(
+                "next_refresh"
+            )
+            await self._runtime.image_store.async_set(preview_png, bin_data, next_refresh)
+
+        await self._run_tracked_send(_display_name(source), _do_send_bin)
 
     async def _resend_last_image(self, next_refresh: str) -> None:
         """Re-uploads the exact bytes last sent, verbatim -- no

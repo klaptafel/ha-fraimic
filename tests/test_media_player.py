@@ -347,8 +347,9 @@ async def test_convert_and_send_resolves_detected_panel_size(
     )
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert captured["width"] == 2560
-    assert captured["height"] == 1440
+    assert captured["width"] == 1440
+    assert captured["height"] == 2560
+    assert captured["byte_layout"] == "blocks_315"
 
 
 async def test_send_image_already_busy(hass: HomeAssistant, aioclient_mock, tmp_path) -> None:
@@ -630,3 +631,127 @@ async def test_media_title_sending_takes_priority_over_unreachable(
     entity._runtime.send_status.sending = None
     entity._runtime.send_status.send_failed = "photo.jpg"
     assert entity.media_title == "Frame never woke up, gave up: photo.jpg"
+
+
+# -- fraimic.send_bin: pre-converted raw frame buffers --
+
+INFO_PAGE_31_5 = (
+    "<div class='info-row'><span class='info-label'>Device Type</span>"
+    "<span class='info-value'>31.5\" E-Ink</span></div>"
+)
+INFO_PAGE_13_3 = INFO_PAGE_31_5.replace("31.5", "13.3")
+
+
+def _write_bin(tmp_path, size: int, fill: int = 0x11) -> str:
+    path = tmp_path / "art.bin"
+    path.write_bytes(bytes([fill]) * size)
+    return str(path)
+
+
+async def test_send_bin_uploads_file_verbatim_and_updates_picture(
+    hass: HomeAssistant, aioclient_mock, tmp_path
+) -> None:
+    aioclient_mock.get(f"{HOST}/info", text=INFO_PAGE_31_5)
+    await _setup(hass, aioclient_mock)
+    aioclient_mock.post(f"{HOST}/api/image", json={})
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = _write_bin(tmp_path, 2_304_000)
+
+    await hass.services.async_call(
+        DOMAIN, "send_bin", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    upload_calls = [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
+    assert len(upload_calls) == 1
+    assert upload_calls[0][2] == b"\x11" * 2_304_000  # untouched
+
+    entity = _get_entity(hass)
+    store = entity._runtime.image_store
+    assert store.bin_content == b"\x11" * 2_304_000
+    preview = Image.open(io.BytesIO(store.content))
+    assert preview.size == (1440, 2560)  # decoded back to native orientation
+    assert hass.states.get(_entity_id(hass)).state == "idle"
+
+
+async def test_send_bin_panel_not_detected_accepts_any_known_size(
+    hass: HomeAssistant, aioclient_mock, tmp_path
+) -> None:
+    """With no detected panel size the frame itself has the last word, so
+    any known panel's exact buffer size is accepted."""
+    await _setup(hass, aioclient_mock)
+    aioclient_mock.post(f"{HOST}/api/image", json={})
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+
+    for size in (960_000, 2_304_000):
+        path = _write_bin(tmp_path, size)
+        await hass.services.async_call(
+            DOMAIN, "send_bin", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    uploads = [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
+    assert [len(c[2]) for c in uploads] == [960_000, 2_304_000]
+
+
+@pytest.mark.parametrize(
+    ("info_page", "size"),
+    [
+        (INFO_PAGE_31_5, 1_843_200),  # the old, wrong 31.5" size
+        (INFO_PAGE_31_5, 960_000),  # a 13.3" buffer on a 31.5" frame
+        (INFO_PAGE_13_3, 2_304_000),  # a 31.5" buffer on a 13.3" frame
+        (INFO_PAGE_13_3, 100),
+    ],
+)
+async def test_send_bin_rejects_wrong_size_without_uploading(
+    hass: HomeAssistant, aioclient_mock, tmp_path, info_page: str, size: int
+) -> None:
+    aioclient_mock.get(f"{HOST}/info", text=info_page)
+    await _setup(hass, aioclient_mock)
+    aioclient_mock.post(f"{HOST}/api/image", json={})
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = _write_bin(tmp_path, size)
+
+    with pytest.raises(HomeAssistantError, match=str(size)):
+        await hass.services.async_call(
+            DOMAIN, "send_bin", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+        )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert not [c for c in aioclient_mock.mock_calls if c[1].path == "/api/image"]
+    assert not _get_entity(hass)._busy_lock.locked()  # a rejected file must not wedge the lock
+
+
+async def test_send_bin_path_not_allowed(hass: HomeAssistant, aioclient_mock, tmp_path) -> None:
+    await _setup(hass, aioclient_mock)
+    path = _write_bin(tmp_path, 960_000)  # tmp_path is NOT in the allowlist
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            DOMAIN, "send_bin", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+        )
+
+
+async def test_send_bin_file_not_found(hass: HomeAssistant, aioclient_mock, tmp_path) -> None:
+    await _setup(hass, aioclient_mock)
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            DOMAIN,
+            "send_bin",
+            {"entity_id": _entity_id(hass), "path": str(tmp_path / "missing.bin")},
+            blocking=True,
+        )
+
+
+async def test_send_bin_already_busy(hass: HomeAssistant, aioclient_mock, tmp_path) -> None:
+    await _setup(hass, aioclient_mock)
+    hass.config.allowlist_external_dirs.add(str(tmp_path))
+    path = _write_bin(tmp_path, 960_000)
+    await _get_entity(hass)._busy_lock.acquire()
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            DOMAIN, "send_bin", {"entity_id": _entity_id(hass), "path": path}, blocking=True
+        )

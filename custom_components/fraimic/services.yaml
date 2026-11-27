@@ -63,6 +63,28 @@ send_image:
       selector:
         boolean:
 
+send_bin:
+  name: Send bin
+  description: >-
+    Sends an already-converted raw frame buffer (.bin) to the frame as-is,
+    without any conversion. The file size must match the panel exactly.
+    Runs in the background and waits up to 10 minutes for the frame to wake
+    if it's asleep.
+  target:
+    entity:
+      domain: media_player
+      integration: fraimic
+  fields:
+    path:
+      name: Path
+      description: >-
+        Path to the .bin file. Must be in an allowed directory
+        (allowlist_external_dirs or /config/www).
+      required: true
+      example: "/config/fraimic/artwork.bin"
+      selector:
+        text:
+
 update_album:
   name: Update album
   description: >-

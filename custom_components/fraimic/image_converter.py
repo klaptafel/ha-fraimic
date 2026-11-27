@@ -5,19 +5,15 @@ from https://github.com/Fraimic/fraimic_bin_converter, so it can run
 in-process (via hass.async_add_executor_job) instead of shelling out to a
 separate Python script.
 
-Output format (Spectra 6, both known panel sizes -- see frame_types.py):
-- 1200 x 1600 pixels portrait (13.3", EL133UF1) or 2560 x 1440 pixels
-  landscape (31.5") -- the pixel dimensions vary by physical panel, but
-  the byte layout below is identical for both.
+Output format (Spectra 6, one byte layout per panel family -- see
+bin_layouts.py for the exact layouts and frame_types.py for which panel
+uses which):
+- 1200 x 1600 pixels portrait (13.3", EL133UF1, "split_half" layout) or
+  1440 x 2560 pixels portrait (31.5", "blocks_315" layout).
 - 6 colors, 4-bit device code per pixel:
     black=0x0, white=0x1, yellow=0x2, red=0x3, blue=0x5, green=0x6
   (0x4 is intentionally unused by the panel.)
-- 4-bit indexed, two pixels per byte (high nibble = even column, low
-  nibble = odd column).
-- Each row is split into a left half (columns 0 .. width//2 - 1) and a
-  right half (columns width//2 .. width - 1). ALL left-half bytes for the
-  whole image come first, then ALL right-half bytes. Total size is
-  always exactly width * height // 2 bytes.
+- 4-bit indexed, two pixels per byte (high nibble = first pixel).
 
 Dithering is done by the required `epaper-dithering` package (Rust core,
 https://github.com/OpenDisplay/epaper-dithering): OKLab color matching,
@@ -46,7 +42,31 @@ import epaper_dithering as _epaper_dithering
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
+from .bin_layouts import pack as _pack_layout
+from .bin_layouts import unpack as _unpack_layout
+
 _LOGGER = logging.getLogger(__name__)
+
+# Measured colours of the 31.5" Spectra 6 panel (reference only; the
+# dithering palette below is still the theoretical one).
+#
+# Measured 2026-11-26 with a Variable Spectro 1 (SCI, D65, 10 deg observer).
+# Each ink was a full-panel solid fill sent as a raw .bin, so there was no
+# dithering or other processing. Two readings per ink, averaged.
+#
+#   ink     nibble   L*     a*      b*     approx sRGB
+#   black   0x0      27.8    2.61   -7.49  #40414D
+#   white   0x1      68.1   -4.24   -3.92  #9AA9AD
+#   yellow  0x2      68.6   -6.54   53.84  #B9A841
+#   red     0x3      34.9   27.82   11.26  #7F3F41
+#   blue    0x5      40.7   -0.01  -33.61  #2D6397
+#   green   0x6      39.7  -12.18    2.22  #486359
+#
+# Takeaways: the usable lightness range is only about L* 28-68, yellow is
+# as light as white, and red and green are dark and muted (green has the
+# lowest chroma, C* about 12). Panel white is slightly cool, so it is the
+# natural reference white. Nibble 0x4 is unused and renders as white.
+# The 13.3" panel has not been measured.
 
 # Palette order must match the code table below 1:1.
 _PALETTE_RGB = [
@@ -90,16 +110,16 @@ def _fit_image(img: Image.Image, fit: str, device_orientation: str, width: int, 
 
     `width`/`height` are the panel's native buffer dimensions -- a
     hardware fact that never changes for a given physical panel, but
-    differs between panel sizes (e.g. portrait-native 1200x1600 for the
-    13.3", landscape-native 2560x1440 for the 31.5" -- see frame_types.py).
+    differs between panel sizes (portrait-native 1200x1600 for the 13.3",
+    portrait-native 1440x2560 for the 31.5" -- see frame_types.py).
     `device_orientation` is a *visual* preference, independent of which
     shape happens to be native: "portrait" always means compose against a
     canvas taller than it is wide, "landscape" always means wider than
     tall, regardless of the native buffer's own shape. Composing then
     rotates onto the native buffer only when the two shapes differ --
-    e.g. "portrait" on a landscape-native panel does rotate; "landscape"
-    on a portrait-native panel (the only case this integration has ever
-    shipped before) also rotates, exactly as before.
+    e.g. "portrait" on a portrait-native panel never rotates, while
+    "landscape" on a portrait-native panel (every panel registered today)
+    does.
 
     `fit`: "fit" (show the whole image, pad with black -- CSS
     object-fit: contain) or "fill" (fill the frame, cropping overflow --
@@ -148,10 +168,10 @@ def _fit_image(img: Image.Image, fit: str, device_orientation: str, width: int, 
 
     if rotate_needed:
         # Rotation direction is a guess (clockwise) -- unconfirmed on
-        # either known panel size (no hardware here to test the 31.5"
-        # against, and the 13.3" case is separately flagged as untested
-        # too). If content comes out upside down or sideways, this is the
-        # line to flip (change -90 to 90).
+        # either known panel size when mounted landscape. The portrait
+        # orientation never reaches this line on a portrait-native panel.
+        # If content comes out upside down or sideways, this is the line
+        # to flip (change -90 to 90).
         result = result.rotate(-90, expand=True)
         steps.append(f"rotate(-90)={result.size}")
 
@@ -211,19 +231,11 @@ def _library_dither_indices(img: Image.Image, dither: str) -> bytearray:
     return bytearray(indices.reshape(-1).tobytes())
 
 
-def _pack_bin(indices: bytes | bytearray, width: int, height: int) -> bytes:
+def _pack_bin(indices: bytes | bytearray, byte_layout: str, width: int, height: int) -> bytes:
     """indices: flat, row-major buffer of palette indices (0-5), length
-    width * height."""
-    # Vectorized: see _library_dither_indices for why. Same left/right-half,
-    # high/low-nibble layout as the original per-pixel loop.
-    idx = np.frombuffer(bytes(indices), dtype=np.uint8).reshape(height, width)
-    codes = _CODE_LUT[idx]
-    left_half, right_half = codes[:, 0 : width // 2], codes[:, width // 2 : width]
-
-    def _pack_half(half: np.ndarray[Any, np.dtype[np.uint8]]) -> bytes:
-        return bytes(((half[:, 0::2] << 4) | half[:, 1::2]).astype(np.uint8).tobytes())
-
-    return _pack_half(left_half) + _pack_half(right_half)
+    width * height. Packed into the panel's frame-buffer byte layout
+    (see bin_layouts.py)."""
+    return _pack_layout(indices, byte_layout, width, height)
 
 
 def _indices_to_preview_png(indices: bytes | bytearray, width: int, height: int) -> bytes:
@@ -245,13 +257,14 @@ def convert_image(
     dither: str = "floyd_steinberg",
     width: int,
     height: int,
+    byte_layout: str,
 ) -> tuple[bytes, bytes]:
     """Convert raw image bytes (jpg/png/etc.) into a Spectra 6 .bin blob.
 
     All arguments after `raw_bytes` are keyword-only, deliberately --
     this function has enough similarly-typed str parameters that
     positional calls are an easy way to silently swap two of them.
-    `width`/`height` have no default for the same reason, just more so:
+    `width`/`height`/`byte_layout` have no default for the same reason, just more so:
     silently defaulting to one panel's dimensions is exactly the kind of
     mistake that produces a garbled image on a *different* physical
     panel with no error at all (see frame_types.py for where these
@@ -266,8 +279,8 @@ def convert_image(
     `dither`: "none", "floyd_steinberg", "atkinson", "ordered", "burkes",
     "stucki", "sierra", "sierra_lite", or "jarvis_judice_ninke" -- all 9
     algorithms epaper_dithering supports.
-    `width`/`height`: the target panel's native buffer dimensions (see
-    frame_types.FrameType).
+    `width`/`height`/`byte_layout`: the target panel's native buffer
+    dimensions and frame-buffer byte layout (see frame_types.FrameType).
     Always uses the theoretical BWGBRY palette (see module docstring).
 
     Returns (bin_data, preview_png). preview_png is the quantized/dithered
@@ -306,7 +319,19 @@ def convert_image(
 
     indices = _library_dither_indices(img, dither)
 
-    bin_data = _pack_bin(indices, width, height)
+    bin_data = _pack_bin(indices, byte_layout, width, height)
     preview_png = _indices_to_preview_png(indices, width, height)
 
     return bin_data, preview_png
+
+
+def bin_to_preview_png(bin_data: bytes, *, width: int, height: int, byte_layout: str) -> bytes:
+    """Decode a raw frame buffer back into a preview PNG at the panel's
+    native dimensions -- the same picture convert_image's preview shows,
+    for a `.bin` that was produced elsewhere. Raises ValueError if
+    `bin_data` is not exactly the size `byte_layout` needs.
+
+    Runs synchronously/CPU-bound -- call via hass.async_add_executor_job.
+    """
+    indices = _unpack_layout(bin_data, byte_layout, width, height)
+    return _indices_to_preview_png(indices.tobytes(), width, height)
