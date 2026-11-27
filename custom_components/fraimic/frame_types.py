@@ -1,14 +1,16 @@
 """Registry of panel physical sizes this integration knows how to drive.
 
-Both registered sizes use the same split-half byte layout (see
-image_converter.py's module docstring) -- if a future panel needs a
-different layout, that's the trigger to add a byte_layout field here,
-not before.
+Each FrameType carries the panel's native buffer dimensions and the byte
+layout its frame buffer is packed in (see bin_layouts.py): the 13.3" uses
+the "split_half" layout, the 31.5" uses the "blocks_315" controller-block
+layout.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
+from .bin_layouts import BLOCKS_315, SPLIT_HALF, bin_size
 
 
 @dataclass(frozen=True)
@@ -16,22 +18,23 @@ class FrameType:
     id: str
     width: int
     height: int
+    byte_layout: str
 
     @property
     def bin_size(self) -> int:
-        # 4 bits/pixel, 2 pixels/byte, split into two equal halves -- see
-        # image_converter.py's module docstring for the full layout.
-        assert self.width % 4 == 0, f"{self.id}: width must be a multiple of 4"
-        return 2 * self.height * (self.width // 4)
+        """Exact size in bytes of this panel's frame buffer -- anything
+        else is rejected by the frame with 400 invalid_image_size."""
+        return bin_size(self.byte_layout, self.width, self.height)
 
 
-# Confirmed dimensions: 13.3" against Fraimic's own reference converter
-# (EL133UF1); 31.5" against a separate open-source Fraimic HA integration
-# and curl against the frame's own /info admin page reporting "Device
-# Type" -- see api.get_info_page.
+# Native buffer dimensions: 13.3" against Fraimic's own reference converter
+# (EL133UF1, portrait 1200x1600); 31.5" is portrait-native 1440x2560, with
+# a byte layout confirmed on a real frame (see bin_layouts.py). The panel
+# size itself comes from the frame's own /info admin page -- see
+# api.get_info_page.
 FRAME_TYPES: dict[str, FrameType] = {
-    "13.3": FrameType(id="13.3", width=1200, height=1600),
-    "31.5": FrameType(id="31.5", width=2560, height=1440),
+    "13.3": FrameType(id="13.3", width=1200, height=1600, byte_layout=SPLIT_HALF),
+    "31.5": FrameType(id="31.5", width=1440, height=2560, byte_layout=BLOCKS_315),
 }
 
 DEFAULT_FRAME_TYPE = FRAME_TYPES["13.3"]

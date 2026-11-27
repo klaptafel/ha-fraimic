@@ -347,8 +347,9 @@ async def test_convert_and_send_resolves_detected_panel_size(
     )
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert captured["width"] == 2560
-    assert captured["height"] == 1440
+    assert captured["width"] == 1440
+    assert captured["height"] == 2560
+    assert captured["byte_layout"] == "blocks_315"
 
 
 async def test_send_image_already_busy(hass: HomeAssistant, aioclient_mock, tmp_path) -> None:

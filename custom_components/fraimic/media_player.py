@@ -286,6 +286,7 @@ class FraimicMediaPlayer(FraimicEntity, MediaPlayerEntity):
                     dither=dither,
                     width=frame_type.width,
                     height=frame_type.height,
+                    byte_layout=frame_type.byte_layout,
                 )
             )
             # Recorded only for a real upload, never a dry run -- a dry run
